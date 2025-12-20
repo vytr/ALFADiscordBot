@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import asyncio
 import config
+from database import Database
 
 class DiscordBot(commands.Bot):
     def __init__(self):
@@ -12,12 +13,17 @@ class DiscordBot(commands.Bot):
         super().__init__(
             command_prefix=config.DISCORD_PREFIX,
             intents=intents,
-            help_command=commands.DefaultHelpCommand()
+            help_command=None  # Отключаем стандартную help команду
         )
+
+        # Инициализация базы данных
+        self.db = Database()
 
     async def setup_hook(self):
         """Загрузка расширений (cogs) при запуске бота"""
+        await self.load_extension('cogs.help')
         await self.load_extension('cogs.basic')
+        await self.load_extension('cogs.whitelist')
         print("Расширения загружены")
 
     async def on_ready(self):
