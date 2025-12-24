@@ -74,8 +74,7 @@ class WarningSystem(commands.Cog):
             cursor = conn.cursor()
             
             # Выговор истекает через 7 дней
-            
-            expires_at = datetime.now(datetime.timezone.utc) + timedelta(days=7)
+            expires_at = datetime.utcnow() + timedelta(minutes=7)
             
             cursor.execute('''
                 INSERT INTO warnings (guild_id, user_id, warned_by, reason, expires_at)
