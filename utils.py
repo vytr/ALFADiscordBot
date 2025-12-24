@@ -7,7 +7,6 @@ def is_admin_or_whitelisted():
     async def predicate(ctx):
         # Проверка на администратора
         if ctx.author.guild_permissions.administrator:
-            print("is admin")
             return True
 
         # Получаем db из бота
@@ -15,7 +14,6 @@ def is_admin_or_whitelisted():
 
         # Проверка на whitelist
         if db.is_whitelisted(ctx.guild.id, ctx.author.id):
-            print("is whitelisted")
             return True
 
         # Если ни то, ни другое

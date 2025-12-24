@@ -67,6 +67,42 @@ class Database:
             )
         ''')
 
+        # Таблица общей статистики пользователей
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_stats_total (
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                total_messages INTEGER DEFAULT 0,
+                total_voice_time INTEGER DEFAULT 0,
+                PRIMARY KEY (guild_id, user_id)
+            )
+        ''')
+
+        # Таблица сообщений по дням
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_messages_daily (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                message_date DATE NOT NULL,
+                message_count INTEGER DEFAULT 1,
+                UNIQUE(guild_id, user_id, message_date)
+            )
+        ''')
+
+        # Таблица времени в голосовых каналах
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_voice_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL,
+                join_time TIMESTAMP NOT NULL,
+                leave_time TIMESTAMP,
+                duration INTEGER
+            )
+        ''')
+
         conn.commit()
         conn.close()
 
@@ -452,3 +488,242 @@ class Database:
                 writer.writerow(row)
 
         return output.getvalue()
+
+    # Методы для работы со статистикой пользователей
+
+    def log_message(self, guild_id: int, user_id: int):
+        """Записать сообщение пользователя"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Увеличиваем общий счетчик
+            cursor.execute('''
+                INSERT INTO user_stats_total (guild_id, user_id, total_messages)
+                VALUES (?, ?, 1)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                total_messages = total_messages + 1
+            ''', (guild_id, user_id))
+
+            # Увеличиваем счетчик за сегодня
+            cursor.execute('''
+                INSERT INTO user_messages_daily (guild_id, user_id, message_date, message_count)
+                VALUES (?, ?, DATE('now'), 1)
+                ON CONFLICT(guild_id, user_id, message_date) DO UPDATE SET
+                message_count = message_count + 1
+            ''', (guild_id, user_id))
+
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error logging message: {e}")
+            return False
+
+    def start_voice_session(self, guild_id: int, user_id: int, channel_id: int):
+        """Начать голосовую сессию"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                INSERT INTO user_voice_sessions (guild_id, user_id, channel_id, join_time)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (guild_id, user_id, channel_id))
+
+            conn.commit()
+            session_id = cursor.lastrowid
+            conn.close()
+            return session_id
+        except Exception as e:
+            print(f"Error starting voice session: {e}")
+            return None
+
+    def end_voice_session(self, guild_id: int, user_id: int, channel_id: int):
+        """Закончить голосовую сессию"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Находим незавершенную сессию
+            cursor.execute('''
+                SELECT id, join_time FROM user_voice_sessions
+                WHERE guild_id = ? AND user_id = ? AND channel_id = ? AND leave_time IS NULL
+                ORDER BY join_time DESC LIMIT 1
+            ''', (guild_id, user_id, channel_id))
+
+            session = cursor.fetchone()
+            if not session:
+                conn.close()
+                return False
+
+            session_id, join_time = session
+
+            # Обновляем сессию
+            cursor.execute('''
+                UPDATE user_voice_sessions
+                SET leave_time = CURRENT_TIMESTAMP,
+                    duration = (julianday(CURRENT_TIMESTAMP) - julianday(join_time)) * 86400
+                WHERE id = ?
+            ''', (session_id,))
+
+            # Получаем длительность
+            cursor.execute('SELECT duration FROM user_voice_sessions WHERE id = ?', (session_id,))
+            duration = cursor.fetchone()[0]
+
+            # Обновляем общую статистику
+            cursor.execute('''
+                INSERT INTO user_stats_total (guild_id, user_id, total_voice_time)
+                VALUES (?, ?, ?)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                total_voice_time = total_voice_time + ?
+            ''', (guild_id, user_id, int(duration), int(duration)))
+
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error ending voice session: {e}")
+            return False
+
+    def cleanup_old_data(self):
+        """Удалить данные старше 30 дней"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Удаляем старые записи сообщений
+            cursor.execute('''
+                DELETE FROM user_messages_daily
+                WHERE message_date < DATE('now', '-30 days')
+            ''')
+
+            # Удаляем старые голосовые сессии
+            cursor.execute('''
+                DELETE FROM user_voice_sessions
+                WHERE join_time < DATETIME('now', '-30 days')
+            ''')
+
+            deleted_messages = cursor.rowcount
+            conn.commit()
+            conn.close()
+            return deleted_messages
+        except Exception as e:
+            print(f"Error cleaning up old data: {e}")
+            return 0
+
+    def get_user_stats(self, guild_id: int, user_id: int, days: int = None) -> dict:
+        """Получить статистику пользователя"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        # Общая статистика
+        cursor.execute('''
+            SELECT total_messages, total_voice_time FROM user_stats_total
+            WHERE guild_id = ? AND user_id = ?
+        ''', (guild_id, user_id))
+        total_stats = cursor.fetchone()
+
+        if not total_stats:
+            conn.close()
+            return None
+
+        total_messages, total_voice_time = total_stats
+
+        # Сообщения за период
+        if days:
+            cursor.execute('''
+                SELECT SUM(message_count) FROM user_messages_daily
+                WHERE guild_id = ? AND user_id = ?
+                AND message_date >= DATE('now', '-' || ? || ' days')
+            ''', (guild_id, user_id, days))
+            period_messages = cursor.fetchone()[0] or 0
+        else:
+            period_messages = total_messages
+
+        # Время в голосовых каналах за период
+        if days:
+            cursor.execute('''
+                SELECT channel_id, SUM(duration) as total_duration
+                FROM user_voice_sessions
+                WHERE guild_id = ? AND user_id = ?
+                AND join_time >= DATETIME('now', '-' || ? || ' days')
+                AND duration IS NOT NULL
+                GROUP BY channel_id
+                ORDER BY total_duration DESC
+            ''', (guild_id, user_id, days))
+        else:
+            cursor.execute('''
+                SELECT channel_id, SUM(duration) as total_duration
+                FROM user_voice_sessions
+                WHERE guild_id = ? AND user_id = ?
+                AND duration IS NOT NULL
+                GROUP BY channel_id
+                ORDER BY total_duration DESC
+            ''', (guild_id, user_id))
+
+        voice_stats = cursor.fetchall()
+        conn.close()
+
+        return {
+            'total_messages': total_messages,
+            'total_voice_time': total_voice_time or 0,
+            'period_messages': period_messages,
+            'voice_by_channel': voice_stats
+        }
+
+    def get_all_users_stats(self, guild_id: int, days: int = None) -> list:
+        """Получить статистику всех пользователей сервера"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        # Получаем всех пользователей с общей статистикой
+        cursor.execute('''
+            SELECT user_id, total_messages, total_voice_time
+            FROM user_stats_total
+            WHERE guild_id = ?
+            ORDER BY total_messages DESC
+        ''', (guild_id,))
+
+        users_total = cursor.fetchall()
+
+        if not users_total:
+            conn.close()
+            return []
+
+        result = []
+
+        for user_id, total_messages, total_voice_time in users_total:
+            # Сообщения за период
+            if days:
+                cursor.execute('''
+                    SELECT SUM(message_count) FROM user_messages_daily
+                    WHERE guild_id = ? AND user_id = ?
+                    AND message_date >= DATE('now', '-' || ? || ' days')
+                ''', (guild_id, user_id, days))
+                period_messages = cursor.fetchone()[0] or 0
+            else:
+                period_messages = total_messages
+
+            # Время в голосовых за период
+            if days:
+                cursor.execute('''
+                    SELECT SUM(duration) FROM user_voice_sessions
+                    WHERE guild_id = ? AND user_id = ?
+                    AND join_time >= DATETIME('now', '-' || ? || ' days')
+                    AND duration IS NOT NULL
+                ''', (guild_id, user_id, days))
+                period_voice = cursor.fetchone()[0] or 0
+            else:
+                period_voice = total_voice_time or 0
+
+            result.append({
+                'user_id': user_id,
+                'total_messages': total_messages,
+                'total_voice_time': total_voice_time or 0,
+                'period_messages': period_messages,
+                'period_voice_time': int(period_voice)
+            })
+
+        conn.close()
+        return result

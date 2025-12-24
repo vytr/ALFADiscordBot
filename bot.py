@@ -24,6 +24,7 @@ class DiscordBot(commands.Bot):
         await self.load_extension('cogs.help')
         await self.load_extension('cogs.basic')
         await self.load_extension('cogs.whitelist')
+        await self.load_extension('cogs.stats')
         print("Расширения загружены")
 
     async def on_ready(self):

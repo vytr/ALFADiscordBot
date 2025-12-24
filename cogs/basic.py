@@ -11,7 +11,7 @@ class Basic(commands.Cog):
         self.bot = bot
         self.db = bot.db
 
-    @commands.command(name='ping')
+    @commands.command(name='alfa_ping')
     @is_admin_or_whitelisted()
     async def ping(self, ctx):
         """Проверка задержки бота"""
@@ -19,7 +19,7 @@ class Basic(commands.Cog):
         latency = round(self.bot.latency * 1000)
         await ctx.send(f'🏓 Понг! Задержка: {latency}ms')
 
-    @commands.command(name='info')
+    @commands.command(name='alfa_info')
     @is_admin_or_whitelisted()
     async def info(self, ctx):
         """Информация о боте"""
@@ -39,14 +39,14 @@ class Basic(commands.Cog):
 
         await ctx.send(embed=embed)
 
-    @commands.command(name='hello')
+    @commands.command(name='alfa_hello')
     @is_admin_or_whitelisted()
     async def hello(self, ctx):
         """Поздороваться с ботом"""
         await ctx.message.delete()
         await ctx.send(f'Привет, {ctx.author.mention}! 👋')
 
-    @commands.command(name='say')
+    @commands.command(name='alfa_say')
     @is_admin_or_whitelisted()
     async def say(self, ctx, *, message: str):
         print("say call")
@@ -139,7 +139,7 @@ class Basic(commands.Cog):
         self.db.remove_vote(poll_id, payload.user_id, option_index)
         print(f"Vote removed: poll_id={poll_id}, user_id={payload.user_id}, option={option_index}")
 
-    @commands.command(name='poll')
+    @commands.command(name='alfa_poll')
     @is_admin_or_whitelisted()
     async def poll(self, ctx, *, question):
         """Создание опроса формата: !poll Вопрос | Вариант1 | Вариант2 | ... МАКСИМУМ 10 ВАРИАНТОВ"""
@@ -188,7 +188,7 @@ class Basic(commands.Cog):
         else:
             await ctx.send("⚠️ Ошибка при сохранении опроса в БД")
 
-    @commands.command(name='poll_results')
+    @commands.command(name='alfa_poll_results')
     @is_admin_or_whitelisted()
     async def poll_results(self, ctx, poll_id: str):
         """Показать результаты опроса по ID"""
@@ -243,7 +243,7 @@ class Basic(commands.Cog):
         embed.set_footer(text=f"ID опроса: {poll_id}")
         await ctx.send(embed=embed)
 
-    @commands.command(name='poll_close')
+    @commands.command(name='alfa_poll_close')
     @is_admin_or_whitelisted()
     async def poll_close(self, ctx, poll_id: str):
         await ctx.message.delete()
@@ -271,7 +271,7 @@ class Basic(commands.Cog):
         else:
             await ctx.send(f"❌ Ошибка при закрытии опроса")
 
-    @commands.command(name='poll_list')
+    @commands.command(name='alfa_poll_list')
     @is_admin_or_whitelisted()
     async def poll_list(self, ctx, days: int = 7):
         await ctx.message.delete()
@@ -308,7 +308,7 @@ class Basic(commands.Cog):
 
         await ctx.send(embed=embed)
 
-    @commands.command(name='poll_export')
+    @commands.command(name='alfa_poll_export')
     @is_admin_or_whitelisted()
     async def poll_export(self, ctx, poll_id: str):
         """Экспортировать опрос в CSV файл"""
@@ -328,7 +328,7 @@ class Basic(commands.Cog):
 
         await ctx.send(f"📊 Экспорт опроса `{poll_id}`", file=file)
 
-    @commands.command(name='poll_export_batch')
+    @commands.command(name='alfa_poll_export_batch')
     @is_admin_or_whitelisted()
     async def poll_export_batch(self, ctx, period: str = "all"):
         """Экспортировать опросы за период (7/14/30/90/all)"""
