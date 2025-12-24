@@ -25,6 +25,7 @@ class DiscordBot(commands.Bot):
         await self.load_extension('cogs.basic')
         await self.load_extension('cogs.whitelist')
         await self.load_extension('cogs.stats')
+        await self.load_extension("cogs.panel")
         print("Расширения загружены")
 
     async def on_ready(self):
@@ -32,7 +33,7 @@ class DiscordBot(commands.Bot):
         print(f'Бот {self.user} успешно запущен!')
         print(f'ID: {self.user.id}')
         print('------')
-
+        await self.tree.sync()
         await self.change_presence(
             activity=discord.Game(name=f"{config.DISCORD_PREFIX}help")
         )

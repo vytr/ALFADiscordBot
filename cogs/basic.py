@@ -15,6 +15,7 @@ class Basic(commands.Cog):
     @is_admin_or_whitelisted()
     async def ping(self, ctx):
         """Проверка задержки бота"""
+        print("ping call")
         await ctx.message.delete()
         latency = round(self.bot.latency * 1000)
         await ctx.send(f'🏓 Понг! Задержка: {latency}ms')
