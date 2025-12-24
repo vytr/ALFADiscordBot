@@ -4,11 +4,6 @@ from datetime import datetime
 import io
 import csv
 from io import StringIO
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-from matplotlib.patches import Wedge
-import numpy as np
 
 class StatsSelectMenu(discord.ui.Select):
     """Dropdown меню для выбора периода статистики"""
@@ -435,7 +430,7 @@ class StatsView(discord.ui.View):
         
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-    @discord.ui.button(label="📈 График активности", style=discord.ButtonStyle.gray, custom_id="activity_chart")
+    @discord.ui.button(label="📊 Детальная статистика", style=discord.ButtonStyle.gray, custom_id="activity_chart")
     async def activity_chart(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         
@@ -443,84 +438,87 @@ class StatsView(discord.ui.View):
         stats = self.bot.db.get_user_stats(interaction.guild.id, interaction.user.id, 30)
         
         if not stats or (stats['total_messages'] == 0 and stats['total_voice_time'] == 0):
-            await interaction.followup.send("📊 Недостаточно данных для создания графика", ephemeral=True)
+            await interaction.followup.send("📊 Недостаточно данных для статистики", ephemeral=True)
             return
 
-        # Создаем график
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-        fig.patch.set_facecolor('#2C2F33')
-        
-        # График 1: Круговая диаграмма активности
-        voice_time = sum([duration for _, duration in stats['voice_by_channel']])
-        messages = stats.get('period_messages', stats['total_messages'])
-        
-        # Нормализуем данные (сообщения в минуты для сравнения)
-        voice_minutes = voice_time / 60
-        message_minutes = messages * 0.5  # Примерно 30 секунд на сообщение
-        
-        if voice_minutes > 0 or message_minutes > 0:
-            ax1.pie(
-                [voice_minutes, message_minutes],
-                labels=['Голосовая активность', 'Текстовая активность'],
-                autopct='%1.1f%%',
-                colors=['#7289DA', '#43B581'],
-                textprops={'color': 'white', 'fontsize': 10}
-            )
-            ax1.set_title('Распределение активности', color='white', fontsize=12, fontweight='bold')
-        
-        # График 2: Топ голосовых каналов
-        if stats['voice_by_channel']:
-            channels = []
-            durations = []
-            for channel_id, duration in stats['voice_by_channel'][:5]:
-                channel = interaction.guild.get_channel(channel_id)
-                channel_name = channel.name if channel else f"ID:{channel_id}"
-                # Обрезаем длинные названия
-                if len(channel_name) > 15:
-                    channel_name = channel_name[:12] + "..."
-                channels.append(channel_name)
-                durations.append(duration / 3600)  # В часах
-            
-            bars = ax2.barh(channels, durations, color='#7289DA')
-            ax2.set_xlabel('Часы', color='white', fontsize=10)
-            ax2.set_title('Топ-5 голосовых каналов', color='white', fontsize=12, fontweight='bold')
-            ax2.tick_params(colors='white')
-            ax2.set_facecolor('#23272A')
-            
-            # Добавляем значения на столбцы
-            for bar in bars:
-                width = bar.get_width()
-                ax2.text(width, bar.get_y() + bar.get_height()/2, 
-                        f'{width:.1f}ч',
-                        ha='left', va='center', color='white', fontsize=9, fontweight='bold')
-        else:
-            ax2.text(0.5, 0.5, 'Нет данных о голосовой активности', 
-                    ha='center', va='center', transform=ax2.transAxes, 
-                    color='white', fontsize=12)
-            ax2.set_facecolor('#23272A')
-            ax2.set_xticks([])
-            ax2.set_yticks([])
-        
-        plt.tight_layout()
-        
-        # Сохраняем в BytesIO
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png', facecolor='#2C2F33', dpi=150)
-        buf.seek(0)
-        plt.close()
-        
-        # Отправляем
-        file = discord.File(buf, filename='activity_chart.png')
-        
         embed = discord.Embed(
-            title="📈 Ваша активность за 30 дней",
+            title="📊 Детальная статистика за 30 дней",
             color=0x7289DA,
             timestamp=datetime.utcnow()
         )
-        embed.set_image(url="attachment://activity_chart.png")
+        
+        # Общие данные
+        voice_time = sum([duration for _, duration in stats['voice_by_channel']])
+        messages = stats.get('period_messages', stats['total_messages'])
+        
+        # Активность
+        voice_hours = int(voice_time // 3600)
+        voice_minutes = int((voice_time % 3600) // 60)
+        
+        embed.add_field(
+            name="💬 Текстовая активность",
+            value=f"**Сообщений:** {messages}\n**Всего за все время:** {stats['total_messages']}",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="🎤 Голосовая активность",
+            value=f"**За период:** {voice_hours}ч {voice_minutes}м\n**Всего за все время:** {int(stats['total_voice_time'] // 3600)}ч {int((stats['total_voice_time'] % 3600) // 60)}м",
+            inline=True
+        )
+        
+        # Процентное соотношение
+        if voice_time > 0 or messages > 0:
+            # Нормализуем для сравнения (сообщения в минуты)
+            voice_minutes_total = voice_time / 60
+            message_minutes_total = messages * 0.5  # ~30 секунд на сообщение
+            total_activity = voice_minutes_total + message_minutes_total
+            
+            voice_percent = (voice_minutes_total / total_activity * 100) if total_activity > 0 else 0
+            message_percent = (message_minutes_total / total_activity * 100) if total_activity > 0 else 0
+            
+            # Визуальная полоса
+            bar_length = 20
+            voice_bar = int(voice_percent / 5)  # 5% = 1 символ
+            message_bar = bar_length - voice_bar
+            
+            embed.add_field(
+                name="📊 Распределение активности",
+                value=f"🎤 Голосовая: `{'█' * voice_bar}{'░' * message_bar}` {voice_percent:.1f}%\n💬 Текстовая: `{'█' * message_bar}{'░' * voice_bar}` {message_percent:.1f}%",
+                inline=False
+            )
+        
+        # Топ-5 голосовых каналов
+        if stats['voice_by_channel']:
+            top_channels_text = []
+            for i, (channel_id, duration) in enumerate(stats['voice_by_channel'][:5], 1):
+                channel = interaction.guild.get_channel(channel_id)
+                channel_name = channel.name if channel else f"ID:{channel_id}"
+                hours = int(duration // 3600)
+                minutes = int((duration % 3600) // 60)
+                
+                # Визуальная полоса
+                max_duration = stats['voice_by_channel'][0][1] if stats['voice_by_channel'] else 1
+                bar_length = int((duration / max_duration) * 10)
+                bar = "█" * bar_length + "░" * (10 - bar_length)
+                
+                top_channels_text.append(f"{i}. **{channel_name}**\n`{bar}` {hours}ч {minutes}м")
+            
+            embed.add_field(
+                name="🎯 Топ-5 голосовых каналов",
+                value="\n".join(top_channels_text),
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="🎯 Топ-5 голосовых каналов",
+                value="Нет данных о голосовой активности",
+                inline=False
+            )
+        
         embed.set_footer(text=f"Запросил: {interaction.user.name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
         
-        await interaction.followup.send(embed=embed, file=file, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="🔙 Назад", style=discord.ButtonStyle.red, custom_id="back_to_main")
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -535,281 +533,6 @@ class StatsView(discord.ui.View):
         embed.set_footer(text="ALFA Bot • Панель управления", icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None)
 
         await interaction.response.edit_message(embed=embed, view=PanelView(self.bot))
-
-    @discord.ui.button(label="😴 Неактивные", style=discord.ButtonStyle.gray, custom_id="inactive_users", row=3)
-    async def inactive_users(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Добавляем Select Menu для выбора периода
-        view = discord.ui.View(timeout=180)
-        
-        select = discord.ui.Select(
-            placeholder="Выберите период неактивности...",
-            options=[
-                discord.SelectOption(label="За 7 дней", emoji="📅", value="7"),
-                discord.SelectOption(label="За 14 дней", emoji="📆", value="14"),
-                discord.SelectOption(label="За 30 дней", emoji="🗓️", value="30"),
-            ]
-        )
-        
-        async def select_callback(inter: discord.Interaction):
-            days = int(select.values[0])
-            await inter.response.defer(ephemeral=True)
-            
-            # Получаем всех пользователей сервера (не ботов)
-            all_members = [m for m in inter.guild.members if not m.bot]
-            
-            # Получаем статистику активных пользователей
-            active_stats = self.bot.db.get_all_users_stats(inter.guild.id, days)
-            active_user_ids = {stat['user_id'] for stat in active_stats if stat['period_messages'] > 0 or stat['period_voice_time'] > 0}
-            
-            # Находим неактивных
-            inactive_members = [m for m in all_members if m.id not in active_user_ids]
-            
-            if not inactive_members:
-                await inter.followup.send(f"✅ Все пользователи были активны за последние {days} дней!", ephemeral=True)
-                return
-            
-            # Формируем embed
-            embed = discord.Embed(
-                title=f"😴 Неактивные пользователи",
-                description=f"Пользователи без активности за последние **{days} дней**",
-                color=0xE67E22,
-                timestamp=datetime.utcnow()
-            )
-            
-            # Список неактивных (максимум 25)
-            inactive_text = []
-            for i, member in enumerate(inactive_members[:25], 1):
-                top_role = member.top_role.name if member.top_role.name != "@everyone" else "Нет роли"
-                inactive_text.append(f"{i}. {member.mention} • `{top_role}`")
-            
-            if inactive_text:
-                if len(inactive_members) <= 25:
-                    embed.add_field(
-                        name=f"👥 Список ({len(inactive_members)} пользователей)",
-                        value="\n".join(inactive_text),
-                        inline=False
-                    )
-                else:
-                    embed.add_field(
-                        name=f"👥 Первые 25 из {len(inactive_members)}",
-                        value="\n".join(inactive_text),
-                        inline=False
-                    )
-            
-            # Статистика
-            total_members = len(all_members)
-            inactive_percent = (len(inactive_members) / total_members * 100) if total_members > 0 else 0
-            
-            embed.add_field(
-                name="📊 Статистика",
-                value=f"**Всего участников:** {total_members}\n**Неактивных:** {len(inactive_members)} ({inactive_percent:.1f}%)\n**Активных:** {len(active_user_ids)} ({100-inactive_percent:.1f}%)",
-                inline=False
-            )
-            
-            # Кнопка экспорта
-            export_view = discord.ui.View(timeout=60)
-            export_btn = discord.ui.Button(label="📤 Экспорт в CSV", style=discord.ButtonStyle.green)
-            
-            async def export_callback(export_inter: discord.Interaction):
-                await export_inter.response.defer(ephemeral=True)
-                
-                # Формируем CSV
-                from io import StringIO
-                import csv
-                
-                output = StringIO()
-                writer = csv.writer(output)
-                
-                writer.writerow(['Inactive Users Report'])
-                writer.writerow(['Server:', inter.guild.name])
-                writer.writerow(['Period:', f'{days} days'])
-                writer.writerow(['Total Members:', len(all_members)])
-                writer.writerow(['Inactive Members:', len(inactive_members)])
-                writer.writerow(['Report Date:', datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')])
-                writer.writerow([])
-                
-                writer.writerow([
-                    'Rank',
-                    'Username',
-                    'Display Name',
-                    'User ID',
-                    'Top Role',
-                    'Joined Server',
-                    'Account Created'
-                ])
-                
-                for i, member in enumerate(inactive_members, 1):
-                    top_role = member.top_role.name if member.top_role.name != "@everyone" else "No Role"
-                    joined = member.joined_at.strftime('%Y-%m-%d') if member.joined_at else "Unknown"
-                    created = member.created_at.strftime('%Y-%m-%d')
-                    
-                    writer.writerow([
-                        i,
-                        member.name,
-                        member.display_name,
-                        member.id,
-                        top_role,
-                        joined,
-                        created
-                    ])
-                
-                csv_data = output.getvalue()
-                
-                # Создаем файл
-                import io
-                file = discord.File(
-                    io.BytesIO(csv_data.encode('utf-8-sig')),
-                    filename=f'inactive_users_{inter.guild.name}_{days}days.csv'
-                )
-                
-                await export_inter.followup.send(
-                    f"📊 Экспорт неактивных пользователей ({len(inactive_members)} пользователей за {days} дней)",
-                    file=file,
-                    ephemeral=True
-                )
-            
-            export_btn.callback = export_callback
-            export_view.add_item(export_btn)
-            
-            embed.set_footer(text="💡 Нажмите кнопку ниже для экспорта полного списка")
-            
-            await inter.followup.send(embed=embed, view=export_view, ephemeral=True)
-        
-        select.callback = select_callback
-        view.add_item(select)
-        
-        embed = discord.Embed(
-            title="😴 Неактивные пользователи",
-            description="Выберите период для поиска неактивных пользователей:",
-            color=0xE67E22
-        )
-        
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-    @discord.ui.button(label="📊 Сводка", style=discord.ButtonStyle.blurple, custom_id="activity_summary", row=3)
-    async def activity_summary(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Добавляем Select Menu для выбора периода
-        view = discord.ui.View(timeout=180)
-        
-        select = discord.ui.Select(
-            placeholder="Выберите период...",
-            options=[
-                discord.SelectOption(label="За 7 дней", emoji="📅", value="7"),
-                discord.SelectOption(label="За 14 дней", emoji="📆", value="14"),
-                discord.SelectOption(label="За 30 дней", emoji="🗓️", value="30"),
-            ]
-        )
-        
-        async def select_callback(inter: discord.Interaction):
-            days = int(select.values[0])
-            await inter.response.defer(ephemeral=True)
-            
-            # Получаем всех пользователей
-            all_members = [m for m in inter.guild.members if not m.bot]
-            
-            # Получаем статистику
-            all_stats = self.bot.db.get_all_users_stats(inter.guild.id, days)
-            
-            # Считаем активность
-            very_active = [s for s in all_stats if s['period_messages'] >= 100 or s['period_voice_time'] >= 3600*10]
-            active = [s for s in all_stats if (s['period_messages'] >= 20 or s['period_voice_time'] >= 3600*2) and s not in very_active]
-            low_active = [s for s in all_stats if (s['period_messages'] > 0 or s['period_voice_time'] > 0) and s not in very_active and s not in active]
-            
-            active_user_ids = {stat['user_id'] for stat in all_stats if stat['period_messages'] > 0 or stat['period_voice_time'] > 0}
-            inactive_members = [m for m in all_members if m.id not in active_user_ids]
-            
-            # Общая статистика
-            total_messages = sum(s['period_messages'] for s in all_stats)
-            total_voice_time = sum(s['period_voice_time'] for s in all_stats)
-            
-            # Формируем embed
-            embed = discord.Embed(
-                title=f"📊 Сводка активности сервера",
-                description=f"Анализ активности за последние **{days} дней**",
-                color=0x3498DB,
-                timestamp=datetime.utcnow()
-            )
-            
-            # Общие цифры
-            embed.add_field(
-                name="📈 Общая активность",
-                value=f"**Сообщений:** {total_messages:,}\n**Время в войсе:** {int(total_voice_time // 3600)}ч {int((total_voice_time % 3600) // 60)}м",
-                inline=True
-            )
-            
-            embed.add_field(
-                name="👥 Участники",
-                value=f"**Всего:** {len(all_members)}\n**Активных:** {len(active_user_ids)}",
-                inline=True
-            )
-            
-            # Пустое поле для выравнивания
-            embed.add_field(name="\u200b", value="\u200b", inline=True)
-            
-            # Разбивка по уровням активности
-            embed.add_field(
-                name="🎯 Уровни активности",
-                value=f"🔥 **Очень активные:** {len(very_active)}\n⚡ **Активные:** {len(active)}\n💬 **Низкая активность:** {len(low_active)}\n😴 **Неактивные:** {len(inactive_members)}",
-                inline=False
-            )
-            
-            # Процентное соотношение
-            total = len(all_members)
-            if total > 0:
-                very_active_pct = len(very_active) / total * 100
-                active_pct = len(active) / total * 100
-                low_active_pct = len(low_active) / total * 100
-                inactive_pct = len(inactive_members) / total * 100
-                
-                # Визуальная диаграмма
-                bar_length = 20
-                very_bar = int(very_active_pct / 100 * bar_length)
-                active_bar = int(active_pct / 100 * bar_length)
-                low_bar = int(low_active_pct / 100 * bar_length)
-                inactive_bar = bar_length - very_bar - active_bar - low_bar
-                
-                visual = f"🔥 `{'█' * very_bar}{'░' * (bar_length - very_bar)}` {very_active_pct:.1f}%\n"
-                visual += f"⚡ `{'█' * active_bar}{'░' * (bar_length - active_bar)}` {active_pct:.1f}%\n"
-                visual += f"💬 `{'█' * low_bar}{'░' * (bar_length - low_bar)}` {low_active_pct:.1f}%\n"
-                visual += f"😴 `{'█' * inactive_bar}{'░' * (bar_length - inactive_bar)}` {inactive_pct:.1f}%"
-                
-                embed.add_field(
-                    name="📊 Распределение активности",
-                    value=visual,
-                    inline=False
-                )
-            
-            # Топ-3 самых активных
-            if all_stats:
-                top_messages = sorted(all_stats, key=lambda x: x['period_messages'], reverse=True)[:3]
-                top_text = []
-                for i, user_data in enumerate(top_messages, 1):
-                    member = inter.guild.get_member(user_data['user_id'])
-                    if member:
-                        emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉"
-                        top_text.append(f"{emoji} {member.mention}: {user_data['period_messages']} сообщений")
-                
-                if top_text:
-                    embed.add_field(
-                        name="🏆 Топ-3 по сообщениям",
-                        value="\n".join(top_text),
-                        inline=False
-                    )
-            
-            embed.set_footer(text=f"💡 Критерии: Очень активные (100+ сообщений или 10+ часов), Активные (20+ сообщений или 2+ часов)")
-            
-            await inter.followup.send(embed=embed, ephemeral=True)
-        
-        select.callback = select_callback
-        view.add_item(select)
-        
-        embed = discord.Embed(
-            title="📊 Сводка активности",
-            description="Выберите период для анализа активности сервера:",
-            color=0x3498DB
-        )
-        
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 class PanelView(discord.ui.View):

@@ -3,11 +3,6 @@ from discord.ext import commands
 from datetime import datetime
 import io
 import sqlite3
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
-import numpy as np
 
 class CreatePollModal(discord.ui.Modal, title="📊 Создать опрос"):
     """Модальное окно для создания опроса"""
@@ -343,7 +338,7 @@ class PollIDModal(discord.ui.Modal, title="🔍 Введите ID опроса")
         await interaction.followup.send(embed=embed, file=file, ephemeral=True)
     
     async def show_chart(self, interaction: discord.Interaction, poll_id: str):
-        """Показать график результатов"""
+        """Показать результаты опроса (текстовая версия)"""
         await interaction.response.defer(ephemeral=True)
         
         results = self.bot.db.get_poll_results(poll_id)
@@ -362,69 +357,37 @@ class PollIDModal(discord.ui.Modal, title="🔍 Введите ID опроса")
             await interaction.followup.send("📊 В этом опросе еще нет голосов", ephemeral=True)
             return
         
-        # Подготавливаем данные для графика
-        options = []
-        vote_counts = []
-        colors = ['#3498DB', '#E74C3C', '#2ECC71', '#F1C40F', '#9B59B6', '#E67E22', '#1ABC9C', '#34495E', '#E91E63', '#FF5722']
-        
-        for option_index, option_text, emoji in results['options']:
-            count = votes_by_option.get(option_index, 0)
-            # Обрезаем длинные названия
-            if len(option_text) > 20:
-                option_text = option_text[:17] + "..."
-            options.append(f"{emoji} {option_text}")
-            vote_counts.append(count)
-        
-        # Создаем график
-        fig, ax = plt.subplots(figsize=(10, 6))
-        fig.patch.set_facecolor('#2C2F33')
-        ax.set_facecolor('#23272A')
-        
-        # Столбчатая диаграмма
-        bars = ax.barh(options, vote_counts, color=colors[:len(options)])
-        
-        # Настройка внешнего вида
-        ax.set_xlabel('Голоса', color='white', fontsize=12, fontweight='bold')
-        ax.set_title(f'Результаты опроса\n{results["question"]}', color='white', fontsize=14, fontweight='bold', pad=20)
-        ax.tick_params(colors='white')
-        
-        # Добавляем значения на столбцы
-        for i, (bar, count) in enumerate(zip(bars, vote_counts)):
-            width = bar.get_width()
-            total = sum(vote_counts)
-            percentage = (count / total * 100) if total > 0 else 0
-            ax.text(width, bar.get_y() + bar.get_height()/2,
-                   f' {count} ({percentage:.1f}%)',
-                   ha='left', va='center', color='white', fontsize=10, fontweight='bold')
-        
-        # Убираем рамки
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['bottom'].set_color('white')
-        ax.spines['left'].set_color('white')
-        
-        plt.tight_layout()
-        
-        # Сохраняем в BytesIO
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png', facecolor='#2C2F33', dpi=150)
-        buf.seek(0)
-        plt.close()
-        
-        # Отправляем
-        file = discord.File(buf, filename='poll_results.png')
+        # Формируем текстовое представление с полосами
+        total_votes = sum(votes_by_option.values())
         
         status = "🔒 Закрыт" if results['is_closed'] else "🔓 Активен"
         embed = discord.Embed(
-            title=f"📊 График результатов {status}",
-            description=f"Всего голосов: **{sum(vote_counts)}**",
+            title=f"📊 Результаты опроса {status}",
+            description=f"**{results['question']}**\n",
             color=0xE74C3C if results['is_closed'] else 0x3498DB,
             timestamp=datetime.utcnow()
         )
-        embed.set_image(url="attachment://poll_results.png")
-        embed.set_footer(text=f"ID опроса: {poll_id}")
         
-        await interaction.followup.send(embed=embed, file=file, ephemeral=True)
+        # Сортируем по количеству голосов
+        sorted_options = sorted(results['options'], key=lambda x: votes_by_option.get(x[0], 0), reverse=True)
+        
+        for option_index, option_text, emoji in sorted_options:
+            count = votes_by_option.get(option_index, 0)
+            percentage = (count / total_votes * 100) if total_votes > 0 else 0
+            
+            # Визуальная полоса (20 символов)
+            bar_length = int(percentage / 5)  # 5% = 1 символ
+            bar = "█" * bar_length + "░" * (20 - bar_length)
+            
+            embed.add_field(
+                name=f"{emoji} {option_text}",
+                value=f"`{bar}`\n**{count}** голосов ({percentage:.1f}%)",
+                inline=False
+            )
+        
+        embed.set_footer(text=f"ID опроса: {poll_id} | Всего голосов: {total_votes}")
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 class PollListSelect(discord.ui.Select):
@@ -513,7 +476,7 @@ class PollsMenuView(discord.ui.View):
         modal = PollIDModal(self.bot, "results")
         await interaction.response.send_modal(modal)
     
-    @discord.ui.button(label="📈 График", style=discord.ButtonStyle.blurple, custom_id="poll_chart", row=0)
+    @discord.ui.button(label="📊 Детально", style=discord.ButtonStyle.blurple, custom_id="poll_chart", row=0)
     async def poll_chart(self, interaction: discord.Interaction, button: discord.ui.Button):
         modal = PollIDModal(self.bot, "chart")
         await interaction.response.send_modal(modal)
