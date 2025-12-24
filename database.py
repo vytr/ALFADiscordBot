@@ -378,6 +378,26 @@ class Database:
         conn.close()
         return results
 
+    def close_all_open_polls(self, guild_id: int) -> int:
+        """Закрыть все открытые опросы на сервере"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                UPDATE polls
+                SET is_closed = 1
+                WHERE guild_id = ? AND is_closed = 0
+            ''', (guild_id,))
+
+            closed_count = cursor.rowcount
+            conn.commit()
+            conn.close()
+            return closed_count
+        except Exception as e:
+            print(f"Error closing all polls: {e}")
+            return 0
+
     def export_poll_to_csv(self, poll_id: str, guild=None) -> str:
         """Экспортировать данные опроса в CSV формат"""
         results = self.get_poll_results(poll_id)

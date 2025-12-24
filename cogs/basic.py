@@ -246,8 +246,8 @@ class Basic(commands.Cog):
     @commands.command(name='alfa_poll_close')
     @is_admin_or_whitelisted()
     async def poll_close(self, ctx, poll_id: str):
-        await ctx.message.delete()
         """Закрыть опрос по ID (новые голоса не будут учитываться)"""
+        await ctx.message.delete()
         # Проверяем, существует ли опрос
         results = self.db.get_poll_results(poll_id)
         if not results:
@@ -270,6 +270,26 @@ class Basic(commands.Cog):
             await ctx.send(embed=embed)
         else:
             await ctx.send(f"❌ Ошибка при закрытии опроса")
+
+    @commands.command(name='alfa_poll_close_all')
+    @is_admin_or_whitelisted()
+    async def poll_close_all(self, ctx):
+        """Закрыть все открытые опросы на сервере"""
+        await ctx.message.delete()
+
+        # Закрываем все опросы
+        closed_count = self.db.close_all_open_polls(ctx.guild.id)
+
+        if closed_count == 0:
+            await ctx.send("⚠️ Нет открытых опросов для закрытия")
+            return
+
+        embed = discord.Embed(
+            title="🔒 Опросы закрыты",
+            description=f"Закрыто опросов: **{closed_count}**\n\nВсе открытые опросы больше не принимают голоса.",
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
 
     @commands.command(name='alfa_poll_list')
     @is_admin_or_whitelisted()
