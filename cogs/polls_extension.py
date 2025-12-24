@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 from datetime import datetime
 import io
+import sqlite3
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -16,8 +17,8 @@ class CreatePollModal(discord.ui.Modal, title="📊 Создать опрос"):
         self.bot = bot
         
         self.question = discord.ui.TextInput(
-            label="Вопрос опроса",
-            placeholder="Например: Какой язык программирования лучший?",
+            label="Опрос",
+            placeholder="Сосал?",
             required=True,
             max_length=200
         )
@@ -207,29 +208,114 @@ class PollIDModal(discord.ui.Modal, title="🔍 Введите ID опроса")
     
     async def close_poll(self, interaction: discord.Interaction, poll_id: str):
         """Закрыть опрос"""
+        await interaction.response.defer(ephemeral=True)
+        
         # Проверяем, существует ли опрос
         results = self.bot.db.get_poll_results(poll_id)
         if not results:
-            await interaction.response.send_message(f"❌ Опрос с ID `{poll_id}` не найден", ephemeral=True)
+            await interaction.followup.send(f"❌ Опрос с ID `{poll_id}` не найден", ephemeral=True)
             return
         
         # Проверяем, не закрыт ли уже
         if results['is_closed']:
-            await interaction.response.send_message(f"⚠️ Опрос `{poll_id}` уже закрыт", ephemeral=True)
+            await interaction.followup.send(f"⚠️ Опрос `{poll_id}` уже закрыт", ephemeral=True)
             return
         
-        # Закрываем опрос
+        # Получаем информацию о сообщении опроса из БД напрямую
+        try:
+            conn = self.bot.db.conn if hasattr(self.bot.db, 'conn') else sqlite3.connect(self.bot.db.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT channel_id, message_id FROM polls
+                WHERE poll_id = ?
+            ''', (poll_id,))
+            
+            poll_data = cursor.fetchone()
+            
+            if not hasattr(self.bot.db, 'conn'):
+                conn.close()
+                
+        except Exception as e:
+            print(f"Ошибка получения данных опроса: {e}")
+            poll_data = None
+        
+        # Закрываем опрос в БД
         if self.bot.db.close_poll(poll_id):
+            # Пытаемся отредактировать оригинальное сообщение
+            message_updated = False
+            if poll_data:
+                try:
+                    # Получаем канал и сообщение
+                    channel_id = poll_data[0]
+                    message_id = poll_data[1]
+                    
+                    channel = self.bot.get_channel(channel_id)
+                    if channel:
+                        message = await channel.fetch_message(message_id)
+                        
+                        # Подсчитываем голоса
+                        votes_by_option = {}
+                        total_votes = 0
+                        for user_id, option_index, voted_at in results['votes']:
+                            votes_by_option[option_index] = votes_by_option.get(option_index, 0) + 1
+                            total_votes += 1
+                        
+                        # Формируем новое описание с результатами
+                        emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+                        description = f"**{results['question']}**\n\n"
+                        
+                        for option_index, option_text, emoji in results['options']:
+                            vote_count = votes_by_option.get(option_index, 0)
+                            percentage = (vote_count / total_votes * 100) if total_votes > 0 else 0
+                            bar_length = int(percentage / 10)
+                            bar = "█" * bar_length + "░" * (10 - bar_length)
+                            description += f"{emoji} {option_text}\n`{bar}` {vote_count} ({percentage:.1f}%)\n\n"
+                        
+                        # Создаем новый embed с пометкой "ЗАКРЫТ"
+                        new_embed = discord.Embed(
+                            title="🔒 Опрос ЗАКРЫТ",
+                            description=description,
+                            color=0xE74C3C,  # Красный цвет
+                            timestamp=datetime.utcnow()
+                        )
+                        new_embed.set_footer(text=f"ID опроса: {poll_id} | Закрыт | Всего голосов: {total_votes}")
+                        
+                        # Обновляем сообщение
+                        await message.edit(embed=new_embed)
+                        message_updated = True
+                        
+                        # Опционально: удаляем все реакции
+                        # await message.clear_reactions()
+                        
+                except discord.NotFound:
+                    # Сообщение удалено
+                    print(f"Сообщение опроса {poll_id} не найдено")
+                except discord.Forbidden:
+                    # Нет прав на редактирование
+                    print(f"Нет прав на редактирование опроса {poll_id}")
+                except Exception as e:
+                    print(f"Ошибка при редактировании сообщения опроса: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Уведомление пользователя
             embed = discord.Embed(
                 title="🔒 Опрос закрыт",
                 description=f"**{results['question']}**\n\nОпрос успешно закрыт. Новые голоса не принимаются.",
                 color=0xE74C3C,
                 timestamp=datetime.utcnow()
             )
+            
+            if message_updated:
+                embed.description += "\n\n✅ Сообщение опроса обновлено с результатами!"
+            else:
+                embed.description += "\n\n⚠️ Не удалось обновить сообщение опроса (возможно, оно удалено или нет прав)."
+            
             embed.set_footer(text=f"ID опроса: {poll_id}")
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed, ephemeral=True)
         else:
-            await interaction.response.send_message(f"❌ Ошибка при закрытии опроса", ephemeral=True)
+            await interaction.followup.send(f"❌ Ошибка при закрытии опроса", ephemeral=True)
     
     async def export_poll(self, interaction: discord.Interaction, poll_id: str):
         """Экспортировать опрос в CSV"""
