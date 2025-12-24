@@ -28,7 +28,8 @@ class DiscordBot(commands.Bot):
             'cogs.whitelist',
             'cogs.stats',
             'cogs.panel',
-            'cogs.polls_extension'
+            'cogs.polls_extension',
+            'cogs.drink_game'
         ]
         
         for cog in cogs_to_load:
