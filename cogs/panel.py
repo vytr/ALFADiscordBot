@@ -643,35 +643,70 @@ class PanelView(discord.ui.View):
 
     @discord.ui.button(label="📊 Polls", style=discord.ButtonStyle.gray, custom_id="panel_polls")
     async def polls(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Импортируем PollsMenuView
+        try:
+            # Попытка импорта из cogs
+            import sys
+            import importlib
+            
+            if 'cogs.polls_extension' in sys.modules:
+                polls_module = sys.modules['cogs.polls_extension']
+                importlib.reload(polls_module)
+                PollsMenuView = polls_module.PollsMenuView
+            else:
+                from cogs.polls_extension import PollsMenuView
+        except ImportError:
+            try:
+                # Запасной вариант
+                from polls_extension import PollsMenuView
+            except ImportError:
+                await interaction.response.send_message(
+                    "❌ Ошибка: модуль polls_extension не найден. Убедитесь, что файл polls_extension.py находится в папке cogs/",
+                    ephemeral=True
+                )
+                return
+        
         embed = discord.Embed(
             title="📊 Управление опросами",
-            description="Доступные команды для работы с опросами:",
-            color=0x95A5A6
-        )
-        embed.add_field(
-            name="Создание опроса",
-            value="</alfa_poll:ID>\n*Создать новый опрос с вариантами ответов*",
-            inline=False
-        )
-        embed.add_field(
-            name="Закрытие опроса",
-            value="</alfa_poll_close:ID>\n*Закрыть активный опрос и подвести итоги*",
-            inline=False
-        )
-        embed.add_field(
-            name="Результаты",
-            value="</alfa_poll_results:ID>\n*Посмотреть текущие результаты опроса*",
-            inline=False
-        )
-        embed.add_field(
-            name="Экспорт данных",
-            value="</alfa_poll_export:ID>\n*Экспортировать результаты в CSV файл*",
-            inline=False
+            description="Интерактивная панель для создания и управления опросами",
+            color=0x3498DB,
+            timestamp=datetime.utcnow()
         )
         
-        embed.set_footer(text="💡 Совет: Используйте опросы для получения обратной связи от участников")
+        embed.add_field(
+            name="➕ Создать опрос",
+            value="Создайте новый опрос через удобную форму",
+            inline=True
+        )
+        embed.add_field(
+            name="📊 Результаты",
+            value="Просмотрите результаты любого опроса",
+            inline=True
+        )
+        embed.add_field(
+            name="📈 График",
+            value="Визуализация результатов опроса",
+            inline=True
+        )
+        embed.add_field(
+            name="📋 Список опросов",
+            value="Все опросы за выбранный период",
+            inline=True
+        )
+        embed.add_field(
+            name="🔒 Закрыть опрос",
+            value="Завершите голосование",
+            inline=True
+        )
+        embed.add_field(
+            name="📤 Экспорт",
+            value="Экспортируйте результаты в CSV",
+            inline=True
+        )
         
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        embed.set_footer(text="Выберите действие с помощью кнопок ниже")
+        
+        await interaction.response.edit_message(embed=embed, view=PollsMenuView(self.bot))
 
     @discord.ui.button(label="📈 Stats", style=discord.ButtonStyle.blurple, custom_id="panel_stats")
     async def stats(self, interaction: discord.Interaction, button: discord.ui.Button):
