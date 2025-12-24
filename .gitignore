@@ -36,3 +36,5 @@ wheels/
 # OS
 .DS_Store
 Thumbs.db
+
+bot_database.db
