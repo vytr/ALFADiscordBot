@@ -597,6 +597,71 @@ class WarningSystem(commands.Cog):
         embed.set_footer(text="💡 Используйте !warnings @пользователь для деталей")
         
         await ctx.send(embed=embed)
+
+    @commands.command(name='warnings_active')
+    @is_admin_or_whitelisted()
+    async def warnings_active_stats(self, ctx):
+        """Статистика активных выговоров на сервере"""
+        
+        import sqlite3
+        conn = sqlite3.connect(self.db.db_path)
+        cursor = conn.cursor()
+        
+        # Общая статистика
+        cursor.execute('''
+            SELECT 
+                COUNT(*) as total,
+                COUNT(DISTINCT user_id) as unique_users
+            FROM warnings
+            WHERE guild_id = ? AND is_active = 1
+        ''', (ctx.guild.id,))
+        
+        stats = cursor.fetchone()
+        total_warnings, unique_users = stats
+        
+        # Топ нарушителей
+        cursor.execute('''
+            SELECT user_id, COUNT(*) as warning_count
+            FROM warnings
+            WHERE guild_id = ? AND is_active = 1
+            GROUP BY user_id
+            ORDER BY warning_count DESC
+            LIMIT 100
+        ''', (ctx.guild.id,))
+        
+        top_offenders = cursor.fetchall()
+        
+        conn.close()
+        
+        embed = discord.Embed(
+            title="📊 Статистика активных выговоров сервера",
+            description=f"Информация по текущим выговорам",
+            color=0x3498DB,
+            timestamp=datetime.utcnow()
+        )
+        
+        embed.add_field(
+            name="📈 Общая статистика",
+            value=f"**Всего активных выговоров:** {total_warnings}\n**Пользователей с выговорами:** {unique_users}",
+            inline=False
+        )
+        
+        if top_offenders:
+            offenders_text = []
+            for i, (user_id, count) in enumerate(top_offenders, 1):
+                member = ctx.guild.get_member(user_id)
+                name = member.mention if member else f"ID:{user_id}"
+                offenders_text.append(f"{i}. {name} - **{count}**/3 выговоров")
+            
+            embed.add_field(
+                name="🔥 активные нарушители",
+                value="\n".join(offenders_text),
+                inline=False
+            )
+        
+        embed.set_footer(text="💡 Выговоры снимаются автоматически через 7 дней")
+        
+        await ctx.send(embed=embed)
     
     @commands.command(name='warnings_all')
     @is_admin_or_whitelisted()
