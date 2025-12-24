@@ -13,6 +13,7 @@ class Whitelist(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def whitelist_add(self, ctx, member: discord.Member):
         """Добавить пользователя в whitelist (только для администраторов)"""
+        await ctx.message.delete()
         if self.db.add_to_whitelist(ctx.guild.id, member.id, ctx.author.id):
             embed = discord.Embed(
                 title="✅ Whitelist",
@@ -27,6 +28,7 @@ class Whitelist(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def whitelist_remove(self, ctx, member: discord.Member):
         """Удалить пользователя из whitelist (только для администраторов)"""
+        await ctx.message.delete()
         if self.db.remove_from_whitelist(ctx.guild.id, member.id):
             embed = discord.Embed(
                 title="✅ Whitelist",
@@ -41,6 +43,7 @@ class Whitelist(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def whitelist_list(self, ctx):
         """Показать список пользователей в whitelist (только для администраторов)"""
+        await ctx.message.delete()
         whitelist = self.db.get_whitelist(ctx.guild.id)
 
         if not whitelist:

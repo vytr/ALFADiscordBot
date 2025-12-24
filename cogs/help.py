@@ -1,12 +1,27 @@
 import discord
 from discord.ext import commands
 from datetime import datetime
+from utils import is_admin_or_whitelisted
 
 class CustomHelpCommand(commands.HelpCommand):
     """Кастомная команда помощи с красивым embed"""
 
     async def send_bot_help(self, mapping):
         """Отправляет общую справку по всем командам"""
+        # Проверяем права пользователя
+        ctx = self.context
+
+        # Проверка на администратора
+        if not ctx.author.guild_permissions.administrator:
+            # Проверка на whitelist
+            db = ctx.bot.db
+            if not db.is_whitelisted(ctx.guild.id, ctx.author.id):
+                # Если нет прав - игнорируем команду (не отвечаем)
+                return
+
+        # Удаляем сообщение пользователя
+        await ctx.message.delete()
+
         embed = discord.Embed(
             title="📖 Справка по командам бота",
             description="Список всех доступных команд",
@@ -40,6 +55,20 @@ class CustomHelpCommand(commands.HelpCommand):
 
     async def send_command_help(self, command):
         """Отправляет справку по конкретной команде"""
+        # Проверяем права пользователя
+        ctx = self.context
+
+        # Проверка на администратора
+        if not ctx.author.guild_permissions.administrator:
+            # Проверка на whitelist
+            db = ctx.bot.db
+            if not db.is_whitelisted(ctx.guild.id, ctx.author.id):
+                # Если нет прав - игнорируем команду (не отвечаем)
+                return
+
+        # Удаляем сообщение пользователя
+        await ctx.message.delete()
+
         embed = discord.Embed(
             title=f"Команда: {self.context.prefix}{command.name}",
             description=command.help or "Нет описания",

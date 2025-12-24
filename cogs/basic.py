@@ -15,6 +15,7 @@ class Basic(commands.Cog):
     @is_admin_or_whitelisted()
     async def ping(self, ctx):
         """Проверка задержки бота"""
+        await ctx.message.delete()
         latency = round(self.bot.latency * 1000)
         await ctx.send(f'🏓 Понг! Задержка: {latency}ms')
 
@@ -22,6 +23,7 @@ class Basic(commands.Cog):
     @is_admin_or_whitelisted()
     async def info(self, ctx):
         """Информация о боте"""
+        await ctx.message.delete()
         embed = discord.Embed(
             title="Информация о боте",
             description="Discord бот на Python",
@@ -41,6 +43,7 @@ class Basic(commands.Cog):
     @is_admin_or_whitelisted()
     async def hello(self, ctx):
         """Поздороваться с ботом"""
+        await ctx.message.delete()
         await ctx.send(f'Привет, {ctx.author.mention}! 👋')
 
     @commands.command(name='say')
@@ -51,16 +54,16 @@ class Basic(commands.Cog):
         await ctx.message.delete()
         await ctx.send(message)
 
-    @commands.Cog.listener()
-    async def on_member_join(self, member):
-        """Приветствие новых участников"""
-        channel = member.guild.system_channel
-        if channel is not None:
-            embed = discord.Embed(
-                description=f'Добро пожаловать на сервер, {member.mention}!',
-                color=discord.Color.green()
-            )
-            await channel.send(embed=embed)
+    # @commands.Cog.listener()
+    # async def on_member_join(self, member):
+    #     """Приветствие новых участников"""
+    #     channel = member.guild.system_channel
+    #     if channel is not None:
+    #         embed = discord.Embed(
+    #             description=f'Добро пожаловать на сервер, {member.mention}!',
+    #             color=discord.Color.green()
+    #         )
+    #         await channel.send(embed=embed)
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload):
@@ -139,7 +142,8 @@ class Basic(commands.Cog):
     @commands.command(name='poll')
     @is_admin_or_whitelisted()
     async def poll(self, ctx, *, question):
-        print("poll call")
+        """Создание опроса формата: !poll Вопрос | Вариант1 | Вариант2 | ... МАКСИМУМ 10 ВАРИАНТОВ"""
+        await ctx.message.delete()
         parts = [p.strip() for p in question.split("|")]
         if len(parts) < 3:
             await ctx.send("Формат: !poll Вопрос | Вариант1 | Вариант2")
@@ -188,6 +192,7 @@ class Basic(commands.Cog):
     @is_admin_or_whitelisted()
     async def poll_results(self, ctx, poll_id: str):
         """Показать результаты опроса по ID"""
+        await ctx.message.delete()
         results = self.db.get_poll_results(poll_id)
 
         if not results:
@@ -241,6 +246,7 @@ class Basic(commands.Cog):
     @commands.command(name='poll_close')
     @is_admin_or_whitelisted()
     async def poll_close(self, ctx, poll_id: str):
+        await ctx.message.delete()
         """Закрыть опрос по ID (новые голоса не будут учитываться)"""
         # Проверяем, существует ли опрос
         results = self.db.get_poll_results(poll_id)
@@ -268,6 +274,7 @@ class Basic(commands.Cog):
     @commands.command(name='poll_list')
     @is_admin_or_whitelisted()
     async def poll_list(self, ctx, days: int = 7):
+        await ctx.message.delete()
         """Показать список опросов за последние N дней (7/14/30/90)"""
         # Проверяем допустимые значения
         if days not in [7, 14, 30, 90]:
@@ -305,6 +312,7 @@ class Basic(commands.Cog):
     @is_admin_or_whitelisted()
     async def poll_export(self, ctx, poll_id: str):
         """Экспортировать опрос в CSV файл"""
+        await ctx.message.delete()
         # Получаем данные опроса
         csv_data = self.db.export_poll_to_csv(poll_id, ctx.guild)
 
@@ -324,6 +332,7 @@ class Basic(commands.Cog):
     @is_admin_or_whitelisted()
     async def poll_export_batch(self, ctx, period: str = "all"):
         """Экспортировать опросы за период (7/14/30/90/all)"""
+        await ctx.message.delete()
         # Определяем период
         if period == "all":
             polls = self.db.get_all_polls(ctx.guild.id)
