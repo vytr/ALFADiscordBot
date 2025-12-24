@@ -3,6 +3,7 @@ from discord.ext import commands
 from datetime import datetime
 from utils import is_admin_or_whitelisted
 import io
+import random
 
 class Basic(commands.Cog):
     """Базовые команды для бота"""
@@ -65,6 +66,29 @@ class Basic(commands.Cog):
     #             color=discord.Color.green()
     #         )
     #         await channel.send(embed=embed)
+
+    @commands.command(name='alfa_duel')
+    async def duel(self,ctx, opponent: discord.Member):
+        if opponent == ctx.author:
+            await ctx.send("Вы не можете драться сами с собой!")
+            return
+
+        await ctx.send(f"{ctx.author.mention} вызывает {opponent.mention} на дуэль!")
+
+        # Генерируем случайные силы для обоих участников
+        player1_power = random.randint(1, 100)
+        player2_power = random.randint(1, 100)
+
+        await ctx.send(f"Сила {ctx.author.mention}: {player1_power}")
+        await ctx.send(f"Сила {opponent.mention}: {player2_power}")
+
+        # Определяем победителя
+        if player1_power > player2_power:
+            await ctx.send(f"{ctx.author.mention} выигрывает дуэль!")
+        elif player1_power < player2_power:
+            await ctx.send(f"{opponent.mention} выигрывает дуэль!")
+        else:
+            await ctx.send("Дуэль окончилась вничью!")
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload):
