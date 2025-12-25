@@ -17,11 +17,23 @@ class Stats(commands.Cog):
     def cog_unload(self):
         self.cleanup_task.cancel()
 
+    async def setup_hook(self):
+        """Вызывается при загрузке cog - закрываем зависшие сессии"""
+        print("🔧 Closing hanging voice sessions...")
+        closed = self.db.close_hanging_voice_sessions(max_duration_hours=24)
+        if closed > 0:
+            print(f"✅ Closed {closed} hanging voice sessions")
+
     @tasks.loop(hours=24)
     async def cleanup_task(self):
         """Ежедневная очистка старых данных"""
         deleted = self.db.cleanup_old_data()
         print(f"Cleaned up {deleted} old records")
+        
+        # Также закрываем зависшие сессии
+        closed = self.db.close_hanging_voice_sessions(max_duration_hours=24)
+        if closed > 0:
+            print(f"Closed {closed} hanging voice sessions during cleanup")
 
     @cleanup_task.before_loop
     async def before_cleanup(self):
@@ -43,7 +55,7 @@ class Stats(commands.Cog):
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
-        """Отслеживание активности в голосовых каналах"""
+        """Отслеживание активности в голосовых каналах (УПРОЩЕННАЯ ВЕРСИЯ)"""
         # Игнорируем ботов
         if member.bot:
             return
@@ -53,24 +65,24 @@ class Stats(commands.Cog):
 
         # Пользователь присоединился к каналу
         if before.channel is None and after.channel is not None:
-            self.db.start_voice_session(guild_id, user_id, after.channel.id)
+            self.db.start_voice_session(guild_id, user_id)
             print(f"Voice session started: {member.name} -> {after.channel.name}")
 
         # Пользователь покинул канал
         elif before.channel is not None and after.channel is None:
-            self.db.end_voice_session(guild_id, user_id, before.channel.id)
+            self.db.end_voice_session(guild_id, user_id)
             print(f"Voice session ended: {member.name} <- {before.channel.name}")
 
         # Пользователь переключился между каналами
+        # В упрощенной версии ничего не делаем - продолжаем считать ту же сессию
         elif before.channel is not None and after.channel is not None and before.channel.id != after.channel.id:
-            self.db.end_voice_session(guild_id, user_id, before.channel.id)
-            self.db.start_voice_session(guild_id, user_id, after.channel.id)
+            # Просто логируем переключение
             print(f"Voice channel switched: {member.name} {before.channel.name} -> {after.channel.name}")
 
     @commands.command(name='alfa_stats')
     @is_admin_or_whitelisted()
     async def stats(self, ctx, member: discord.Member = None, days: int = None):
-        """Показать статистику пользователя. Формат: !stats [@user] [7/14/30]"""
+        """Показать статистику пользователя. Формат: !alfa_stats [@user] [7/14/30]"""
         await ctx.message.delete()
 
         # Если пользователь не указан - показываем статистику автора
@@ -114,8 +126,8 @@ class Stats(commands.Cog):
                 inline=False
             )
 
-        # Голосовые каналы
-        voice_time_period = sum([duration for _, duration in stats['voice_by_channel']])
+        # Голосовые каналы (УПРОЩЕННАЯ ВЕРСИЯ - без разбивки по каналам)
+        voice_time_period = stats['period_voice_time']
         hours_period = int(voice_time_period // 3600)
         minutes_period = int((voice_time_period % 3600) // 60)
 
@@ -135,28 +147,12 @@ class Stats(commands.Cog):
                 inline=False
             )
 
-        # Топ каналов
-        if stats['voice_by_channel']:
-            top_channels = []
-            for channel_id, duration in stats['voice_by_channel'][:5]:
-                channel = ctx.guild.get_channel(channel_id)
-                channel_name = channel.name if channel else f"ID:{channel_id}"
-                hours = int(duration // 3600)
-                minutes = int((duration % 3600) // 60)
-                top_channels.append(f"**{channel_name}:** {hours}ч {minutes}м")
-
-            embed.add_field(
-                name="🏆 Топ голосовых каналов",
-                value="\n".join(top_channels),
-                inline=False
-            )
-
         await ctx.send(embed=embed)
 
     @commands.command(name='alfa_stats_export')
     @is_admin_or_whitelisted()
     async def stats_export(self, ctx, member: discord.Member = None, days: int = None):
-        """Экспортировать статистику в CSV. Формат: !stats_export [@user] [7/14/30]"""
+        """Экспортировать статистику в CSV. Формат: !alfa_stats_export [@user] [7/14/30]"""
         await ctx.message.delete()
 
         # Если пользователь не указан - показываем статистику автора
@@ -194,394 +190,157 @@ class Stats(commands.Cog):
         writer.writerow([])
 
         writer.writerow(['Voice Time'])
-        voice_time_period = sum([duration for _, duration in stats['voice_by_channel']])
         if days:
-            writer.writerow(['Period Voice Time (seconds):', int(voice_time_period)])
-        writer.writerow(['Total Voice Time (seconds):', int(stats['total_voice_time'])])
-        writer.writerow([])
-
-        writer.writerow(['Voice Channels'])
-        writer.writerow(['Channel Name', 'Time (seconds)', 'Time (formatted)'])
-        for channel_id, duration in stats['voice_by_channel']:
-            channel = ctx.guild.get_channel(channel_id)
-            channel_name = channel.name if channel else f"ID:{channel_id}"
-            hours = int(duration // 3600)
-            minutes = int((duration % 3600) // 60)
-            writer.writerow([channel_name, int(duration), f"{hours}h {minutes}m"])
+            writer.writerow(['Period Voice Time (seconds):', stats['period_voice_time']])
+            writer.writerow(['Period Voice Time (hours):', round(stats['period_voice_time'] / 3600, 2)])
+        writer.writerow(['Total Voice Time (seconds):', stats['total_voice_time']])
+        writer.writerow(['Total Voice Time (hours):', round(stats['total_voice_time'] / 3600, 2)])
 
         csv_data = output.getvalue()
 
         # Создаем файл
         file = discord.File(
             io.BytesIO(csv_data.encode('utf-8-sig')),
-            filename=f'stats_{member.name}_{period_text}.csv'
+            filename=f'user_stats_{member.display_name}_{period_text}.csv'
         )
 
-        await ctx.send(f"📊 Экспорт статистики {member.mention}", file=file)
+        await ctx.send(f"📊 Статистика {member.mention} экспортирована", file=file)
 
-    @commands.command(name='alfa_stats_all')
+    @commands.command(name='alfa_leaderboard')
     @is_admin_or_whitelisted()
-    async def stats_all(self, ctx, days: int = None, role: discord.Role = None):
-        """Показать статистику всех пользователей. Формат: !stats_all [7/14/30]"""
+    async def leaderboard(self, ctx, days: int = 7):
+        """Таблица лидеров. Формат: !alfa_leaderboard [7/14/30]"""
         await ctx.message.delete()
 
-        # Проверяем допустимость дней
-        if days and days not in [7, 14, 30]:
-            await ctx.send("❌ Допустимые периоды: 7, 14 или 30 дней")
-            return
-
-        # Получаем статистику всех пользователей
-        all_stats = self.db.get_all_users_stats(ctx.guild.id, days)
-        filtered = []
-        if role:
-            for user_data in all_stats:
-                member = ctx.guild.get_member(user_data['user_id'])
-                if not member:
-                    try:
-                        member = await ctx.guild.fetch_member(int(user_data['user_id']))
-                    except discord.NotFound:
-                        continue
-                if role in member.roles:
-                   filtered.append(user_data)
-        else:
-            filtered = all_stats
-            
-
-        if not filtered:
-            await ctx.send("📊 Нет данных о пользователях")
-            return
-
-        # Ограничиваем до топ-25 для отображения
-        display_stats = filtered[:25]
-
-        period_text = f"за последние {days} дней" if days else "за все время"
-        title = f"📊 Статистика пользователей сервера"
-        if role:
-            title += f" с ролью {role.name}"
-        embed = discord.Embed(
-            title=title,
-            description=f"Топ-{len(display_stats)} пользователей {period_text}",
-            color=discord.Color.blue(),
-            timestamp=datetime.utcnow()
-        )
-
-        # Топ по сообщениям
-        messages_top = sorted(display_stats, key=lambda x: x['period_messages'], reverse=True)[:10]
-        messages_text = []
-        for i, user_data in enumerate(messages_top, 1):
-            member = ctx.guild.get_member(user_data['user_id'])
-            if member:
-                messages_text.append(f"{i}. **{member.display_name}**: {user_data['period_messages']} сообщений")
-
-        if messages_text:
-            embed.add_field(
-                name="💬 Топ по сообщениям",
-                value="\n".join(messages_text),
-                inline=False
-            )
-
-        # Топ по времени в войсе
-        voice_top = sorted(display_stats, key=lambda x: x['period_voice_time'], reverse=True)[:10]
-        voice_text = []
-        for i, user_data in enumerate(voice_top, 1):
-            member = ctx.guild.get_member(user_data['user_id'])
-            if member:
-                hours = int(user_data['period_voice_time'] // 3600)
-                minutes = int((user_data['period_voice_time'] % 3600) // 60)
-                voice_text.append(f"{i}. **{member.display_name}**: {hours}ч {minutes}м")
-
-        if voice_text:
-            embed.add_field(
-                name="🎤 Топ по времени в войсе",
-                value="\n".join(voice_text),
-                inline=False
-            )
-
-        embed.set_footer(text=f"Всего пользователей: {len(all_stats)} | Используйте !stats_all_export для полного списка")
-
-        await ctx.send(embed=embed)
-
-    @commands.command(name='alfa_stats_all_export')
-    @is_admin_or_whitelisted()
-    async def stats_all_export(self, ctx, days: int = None):
-        """Экспортировать статистику всех пользователей в CSV. Формат: !stats_all_export [7/14/30]"""
-        await ctx.message.delete()
-
-        # Проверяем допустимость дней
-        if days and days not in [7, 14, 30]:
-            await ctx.send("❌ Допустимые периоды: 7, 14 или 30 дней")
+        if days not in [7, 14, 30]:
+            await ctx.send("❌ Допустимые периоды: 7, 14 или 30 дней", delete_after=10)
             return
 
         # Получаем статистику всех пользователей
         all_stats = self.db.get_all_users_stats(ctx.guild.id, days)
 
         if not all_stats:
-            await ctx.send("📊 Нет данных о пользователях")
+            await ctx.send("📊 Нет данных для отображения", delete_after=10)
             return
 
-        # Формируем CSV
-        output = StringIO()
-        writer = csv.writer(output)
-
-        period_text = f"{days} days" if days else "all time"
-
-        writer.writerow(['Server Statistics'])
-        writer.writerow(['Server:', ctx.guild.name])
-        writer.writerow(['Period:', period_text])
-        writer.writerow(['Total Users:', len(all_stats)])
-        writer.writerow([])
-
-        # Заголовок таблицы
-        if days:
-            writer.writerow([
-                'Rank',
-                'User Name',
-                'User ID',
-                f'Messages ({period_text})',
-                'Total Messages',
-                f'Voice Time ({period_text})',
-                'Total Voice Time'
-            ])
-        else:
-            writer.writerow([
-                'Rank',
-                'User Name',
-                'User ID',
-                'Total Messages',
-                'Total Voice Time'
-            ])
-
         # Сортируем по сообщениям
-        sorted_stats = sorted(all_stats, key=lambda x: x['period_messages'], reverse=True)
+        top_messages = sorted(all_stats, key=lambda x: x['period_messages'], reverse=True)[:20]
 
-        # Записываем данные
-        for i, user_data in enumerate(sorted_stats, 1):
-            member = ctx.guild.get_member(user_data['user_id'])
-            user_name = member.display_name if member else f"User ID: {user_data['user_id']}"
+        # Сортируем по времени в войсе
+        top_voice = sorted(all_stats, key=lambda x: x['period_voice_time'], reverse=True)[:20]
 
-            if days:
-                # Форматируем время
-                period_hours = int(user_data['period_voice_time'] // 3600)
-                period_minutes = int((user_data['period_voice_time'] % 3600) // 60)
-                total_hours = int(user_data['total_voice_time'] // 3600)
-                total_minutes = int((user_data['total_voice_time'] % 3600) // 60)
-
-                writer.writerow([
-                    i,
-                    user_name,
-                    user_data['user_id'],
-                    user_data['period_messages'],
-                    user_data['total_messages'],
-                    f"{period_hours}h {period_minutes}m",
-                    f"{total_hours}h {total_minutes}m"
-                ])
-            else:
-                hours = int(user_data['total_voice_time'] // 3600)
-                minutes = int((user_data['total_voice_time'] % 3600) // 60)
-
-                writer.writerow([
-                    i,
-                    user_name,
-                    user_data['user_id'],
-                    user_data['total_messages'],
-                    f"{hours}h {minutes}m"
-                ])
-
-        csv_data = output.getvalue()
-
-        # Создаем файл
-        file = discord.File(
-            io.BytesIO(csv_data.encode('utf-8-sig')),
-            filename=f'server_stats_{ctx.guild.name}_{period_text}.csv'
+        # Создаем embed для сообщений
+        embed_messages = discord.Embed(
+            title=f"🏆 Топ по сообщениям (последние {days} дней)",
+            color=discord.Color.gold(),
+            timestamp=datetime.utcnow()
         )
 
-        await ctx.send(f"📊 Экспорт статистики сервера ({len(all_stats)} пользователей)", file=file)
+        leaderboard_text = []
+        for i, user_data in enumerate(top_messages, 1):
+            member = ctx.guild.get_member(user_data['user_id'])
+            if member:
+                emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"**{i}.**"
+                leaderboard_text.append(
+                    f"{emoji} {member.mention}: **{user_data['period_messages']}** сообщений"
+                )
 
-    # Добавьте эти улучшенные команды в stats.py
-# Заменяют существующие alfa_inactive, alfa_inactive_export, alfa_activity_summary
+        embed_messages.description = "\n".join(leaderboard_text)
+
+        # Создаем embed для войса
+        embed_voice = discord.Embed(
+            title=f"🎤 Топ по времени в войсе (последние {days} дней)",
+            color=discord.Color.blue(),
+            timestamp=datetime.utcnow()
+        )
+
+        leaderboard_voice = []
+        for i, user_data in enumerate(top_voice, 1):
+            member = ctx.guild.get_member(user_data['user_id'])
+            if member:
+                hours = int(user_data['period_voice_time'] // 3600)
+                minutes = int((user_data['period_voice_time'] % 3600) // 60)
+                emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"**{i}.**"
+                leaderboard_voice.append(
+                    f"{emoji} {member.mention}: **{hours}ч {minutes}м**"
+                )
+
+        embed_voice.description = "\n".join(leaderboard_voice)
+
+        await ctx.send(embed=embed_messages)
+        await ctx.send(embed=embed_voice)
 
     @commands.command(name='alfa_inactive')
     @is_admin_or_whitelisted()
-    async def inactive_users(self, ctx, days: int = 7, role: discord.Role = None):
-        """Показать список неактивных пользователей. Формат: !alfa_inactive [7/14/30] [@роль]"""
+    async def inactive(self, ctx, days: int = 7, role: discord.Role = None):
+        """Показать неактивных участников. Формат: !alfa_inactive [7/14/30] [@роль]"""
         await ctx.message.delete()
-        
-        # Проверяем допустимость дней
+
         if days not in [7, 14, 30]:
             await ctx.send("❌ Допустимые периоды: 7, 14 или 30 дней", delete_after=10)
             return
-        
-        # Получаем всех пользователей сервера (не ботов)
+
+        # Получаем всех участников (исключая ботов)
         all_members = [m for m in ctx.guild.members if not m.bot]
         
         # Фильтруем по роли если указана
         if role:
             all_members = [m for m in all_members if role in m.roles]
-        
-        # Получаем статистику активных пользователей
-        active_stats = self.db.get_all_users_stats(ctx.guild.id, days)
-        active_user_ids = {stat['user_id'] for stat in active_stats if stat['period_messages'] > 0 or stat['period_voice_time'] > 0}
-        
+
+        # Получаем статистику
+        all_stats = self.db.get_all_users_stats(ctx.guild.id, days)
+
+        # Находим ID активных пользователей
+        active_user_ids = {
+            stat['user_id'] for stat in all_stats 
+            if stat['period_messages'] > 0 or stat['period_voice_time'] > 0
+        }
+
         # Находим неактивных
         inactive_members = [m for m in all_members if m.id not in active_user_ids]
-        
+
         if not inactive_members:
-            role_text = f" с ролью {role.mention}" if role else ""
-            await ctx.send(f"✅ Все пользователи{role_text} были активны за последние {days} дней!", delete_after=15)
+            role_text = f" с ролью **{role.name}**" if role else ""
+            await ctx.send(f"✅ Все участники{role_text} активны за последние {days} дней!", delete_after=10)
             return
-        
+
         # Формируем embed
         title_suffix = f" (роль: {role.name})" if role else ""
         embed = discord.Embed(
-            title=f"😴 Неактивные пользователи{title_suffix}",
-            description=f"Пользователи без активности за последние **{days} дней**",
-            color=0xE67E22,
+            title=f"😴 Неактивные участники{title_suffix}",
+            description=f"Участники без активности за последние **{days} дней**",
+            color=discord.Color.red(),
             timestamp=datetime.utcnow()
         )
-        
-        # Группируем по ролям
-        inactive_text = []
-        for i, member in enumerate(inactive_members[:25], 1):  # Ограничиваем до 25
-            # Получаем высшую роль (кроме @everyone)
-            top_role = member.top_role.name if member.top_role.name != "@everyone" else "Нет роли"
-            inactive_text.append(f"{i}. {member.mention} • `{top_role}`")
-        
-        if len(inactive_text) > 0:
-            # Разбиваем на части если много
-            if len(inactive_members) <= 25:
-                embed.add_field(
-                    name=f"👥 Список ({len(inactive_members)} пользователей)",
-                    value="\n".join(inactive_text),
-                    inline=False
-                )
-            else:
-                # Первые 25
-                embed.add_field(
-                    name=f"👥 Первые 25 из {len(inactive_members)}",
-                    value="\n".join(inactive_text[:25]),
-                    inline=False
-                )
-        
-        # Статистика
-        total_members = len(all_members)
-        inactive_percent = (len(inactive_members) / total_members * 100) if total_members > 0 else 0
-        
-        embed.add_field(
-            name="📊 Статистика",
-            value=f"**Всего участников:** {total_members}\n**Неактивных:** {len(inactive_members)} ({inactive_percent:.1f}%)\n**Активных:** {len(active_user_ids)} ({100-inactive_percent:.1f}%)",
-            inline=False
-        )
-        
-        embed.set_footer(text=f"Используйте !alfa_inactive_export {days} для полного списка")
-        
+
+        # Разбиваем на чанки по 20 пользователей
+        chunk_size = 20
+        for i in range(0, len(inactive_members), chunk_size):
+            chunk = inactive_members[i:i + chunk_size]
+            members_list = [f"• {m.mention} ({m.name})" for m in chunk]
+            
+            field_name = f"Неактивные участники ({i+1}-{min(i+chunk_size, len(inactive_members))})"
+            embed.add_field(
+                name=field_name,
+                value="\n".join(members_list),
+                inline=False
+            )
+
+        embed.set_footer(text=f"Всего неактивных: {len(inactive_members)}")
+
         await ctx.send(embed=embed)
-    
-    @commands.command(name='alfa_inactive_export')
+
+    @commands.command(name='alfa_summary')
     @is_admin_or_whitelisted()
-    async def inactive_export(self, ctx, days: int = 7, role: discord.Role = None):
-        """Экспортировать список неактивных в CSV. Формат: !alfa_inactive_export [7/14/30] [@роль]"""
+    async def summary(self, ctx, days: int = 7, role: discord.Role = None):
+        """Сводка активности сервера. Формат: !alfa_summary [7/14/30] [@роль]"""
         await ctx.message.delete()
         
-        # Проверяем допустимость дней
         if days not in [7, 14, 30]:
             await ctx.send("❌ Допустимые периоды: 7, 14 или 30 дней", delete_after=10)
             return
         
-        # Получаем всех пользователей сервера (не ботов)
-        all_members = [m for m in ctx.guild.members if not m.bot]
-        
-        # Фильтруем по роли если указана
-        if role:
-            all_members = [m for m in all_members if role in m.roles]
-        
-        # Получаем статистику активных пользователей
-        active_stats = self.db.get_all_users_stats(ctx.guild.id, days)
-        active_user_ids = {stat['user_id'] for stat in active_stats if stat['period_messages'] > 0 or stat['period_voice_time'] > 0}
-        
-        # Находим неактивных
-        inactive_members = [m for m in all_members if m.id not in active_user_ids]
-        
-        if not inactive_members:
-            role_text = f" с ролью {role.mention}" if role else ""
-            await ctx.send(f"✅ Все пользователи{role_text} были активны за последние {days} дней!", delete_after=15)
-            return
-        
-        # Формируем CSV
-        output = StringIO()
-        writer = csv.writer(output)
-        
-        writer.writerow(['Inactive Users Report'])
-        writer.writerow(['Server:', ctx.guild.name])
-        writer.writerow(['Period:', f'{days} days'])
-        if role:
-            writer.writerow(['Filtered by role:', role.name])
-        writer.writerow(['Total Members:', len(all_members)])
-        writer.writerow(['Inactive Members:', len(inactive_members)])
-        writer.writerow(['Report Date:', datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')])
-        writer.writerow([])
-        
-        # Заголовок таблицы
-        writer.writerow([
-            'Rank',
-            'Username',
-            'Display Name',
-            'User ID',
-            'Top Role',
-            'All Roles',  # НОВОЕ: Все роли
-            'Joined Server',
-            'Account Created'
-        ])
-        
-        # Записываем данных
-        for i, member in enumerate(inactive_members, 1):
-            top_role = member.top_role.name if member.top_role.name != "@everyone" else "No Role"
-            
-            # Все роли (кроме @everyone)
-            all_roles = ", ".join([r.name for r in member.roles if r.name != "@everyone"])
-            if not all_roles:
-                all_roles = "No Roles"
-            
-            joined = member.joined_at.strftime('%Y-%m-%d') if member.joined_at else "Unknown"
-            created = member.created_at.strftime('%Y-%m-%d')
-            
-            writer.writerow([
-                i,
-                member.name,
-                member.display_name,
-                member.id,
-                top_role,
-                all_roles,  # НОВОЕ
-                joined,
-                created
-            ])
-        
-        csv_data = output.getvalue()
-        
-        # Создаем файл
-        role_suffix = f"_role_{role.name}" if role else ""
-        file = discord.File(
-            io.BytesIO(csv_data.encode('utf-8-sig')),
-            filename=f'inactive_users_{ctx.guild.name}_{days}days{role_suffix}.csv'
-        )
-        
-        role_text = f" с ролью **{role.name}**" if role else ""
-        await ctx.send(
-            f"📊 Экспорт неактивных пользователей{role_text} ({len(inactive_members)} пользователей за {days} дней)",
-            file=file
-        )
-    
-    @commands.command(name='alfa_activity_summary')
-    @is_admin_or_whitelisted()
-    async def activity_summary(self, ctx, days: int = 7, role: discord.Role = None):
-        """Общая сводка активности. Формат: !alfa_activity_summary [7/14/30] [@роль]"""
-        await ctx.message.delete()
-        
-        # Проверяем допустимость дней
-        if days not in [7, 14, 30]:
-            await ctx.send("❌ Допустимые периоды: 7, 14 или 30 дней", delete_after=10)
-            return
-        
-        # Получаем всех пользователей
+        # Получаем всех участников (исключая ботов)
         all_members = [m for m in ctx.guild.members if not m.bot]
         
         # Фильтруем по роли если указана
@@ -733,7 +492,7 @@ class Stats(commands.Cog):
             'Display Name',
             'User ID',
             'Top Role',
-            'All Roles',  # НОВОЕ
+            'All Roles',
             'Messages (Period)',
             'Messages (Total)',
             'Voice Time (Period, hours)',
@@ -764,7 +523,7 @@ class Stats(commands.Cog):
                 display_name,
                 user_data['user_id'],
                 top_role,
-                all_roles,  # НОВОЕ
+                all_roles,
                 user_data['period_messages'],
                 user_data['total_messages'],
                 round(user_data['period_voice_time'] / 3600, 2),
@@ -786,5 +545,42 @@ class Stats(commands.Cog):
             file=file
         )
 
+    @commands.command(name='alfa_voice_debug')
+    @commands.has_permissions(administrator=True)
+    async def voice_debug(self, ctx):
+        """[ADMIN] Показать активные голосовые сессии для отладки"""
+        await ctx.message.delete()
+        
+        sessions = self.db.get_active_voice_sessions(ctx.guild.id)
+        
+        if not sessions:
+            await ctx.send("✅ Нет активных голосовых сессий", delete_after=10)
+            return
+        
+        embed = discord.Embed(
+            title="🔧 Активные голосовые сессии",
+            description=f"Найдено {len(sessions)} активных сессий",
+            color=discord.Color.orange(),
+            timestamp=datetime.utcnow()
+        )
+        
+        for session_id, guild_id, user_id, join_time, current_duration in sessions:
+            member = ctx.guild.get_member(user_id)
+            username = member.display_name if member else f"Unknown (ID: {user_id})"
+            
+            hours = int(current_duration // 3600)
+            minutes = int((current_duration % 3600) // 60)
+            
+            embed.add_field(
+                name=f"Session #{session_id}",
+                value=f"**User:** {username}\n**Duration:** {hours}ч {minutes}м\n**Started:** {join_time}",
+                inline=False
+            )
+        
+        await ctx.send(embed=embed)
+
 async def setup(bot):
-    await bot.add_cog(Stats(bot))
+    cog = Stats(bot)
+    await bot.add_cog(cog)
+    # Вызываем setup_hook после добавления cog
+    await cog.setup_hook()
