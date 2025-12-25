@@ -151,14 +151,14 @@ class DrinkGame(commands.Cog):
     
     @commands.command(name='drink')
     async def drink(self, ctx):
-        """Выпить случайный напиток! Доступно раз в 8 часов."""
+        """Выпить случайный напиток! Доступно раз в час."""
         
         # Проверяем cooldown
         last_drink = self.get_last_drink_time(ctx.guild.id, ctx.author.id)
         
         if last_drink:
             time_passed = datetime.utcnow() - last_drink
-            cooldown = timedelta(hours=8)
+            cooldown = timedelta(hours=1)
             
             if time_passed < cooldown:
                 time_left = cooldown - time_passed
@@ -219,7 +219,7 @@ class DrinkGame(commands.Cog):
             "Отличный выбор! 🎉",
             "За здоровье! 🥂",
             "Пейте ответственно! 😄",
-            "Ещё по одной? Нет, через 8 часов! ⏰",
+            "Ещё по одной? Нет, через час! ⏰",
             "Вкусно? 😋",
             "Классно пошло! 👌",
             "Приятного аппетита! 🍻",
