@@ -404,10 +404,11 @@ class StatsView(discord.ui.View):
             await inter.response.send_modal(modal)
         
         async def export_all_callback(inter: discord.Interaction):
-            # Проверка прав администратора
+            # Проверка прав: администратор или в whitelist
             if not inter.user.guild_permissions.administrator:
-                await inter.response.send_message("⛔ Только администраторы могут экспортировать статистику всех пользователей", ephemeral=True)
-                return
+                if not self.bot.db.is_whitelisted(inter.guild.id, inter.user.id):
+                    await inter.response.send_message("⛔ Экспорт всех пользователей доступен только администраторам и whitelisted пользователям!", ephemeral=True)
+                    return
             modal = ExportModal(self.bot, "all")
             await inter.response.send_modal(modal)
         
@@ -888,6 +889,14 @@ class PanelView(discord.ui.View):
     
     @discord.ui.button(label="👥 Whitelist", style=discord.ButtonStyle.green, custom_id="whitelist_panel", row=0)
     async def whitelist(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Проверка прав: только администраторы могут управлять whitelist
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message(
+                "⛔ Управление whitelist доступно только администраторам!",
+                ephemeral=True
+            )
+            return
+        
         embed = discord.Embed(
             title="👥 Управление Whitelist",
             description="Whitelist дает пользователям доступ к командам управления без прав администратора",
@@ -986,6 +995,15 @@ class PanelView(discord.ui.View):
     
     @discord.ui.button(label="⚠️ Warnings", style=discord.ButtonStyle.red, custom_id="warnings_panel", row=1)  # ← НОВАЯ КНОПКА!
     async def warnings(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Проверка прав: администратор или в whitelist
+        if not interaction.user.guild_permissions.administrator:
+            if not self.bot.db.is_whitelisted(interaction.guild.id, interaction.user.id):
+                await interaction.response.send_message(
+                    "⛔ Система выговоров доступна только администраторам и whitelisted пользователям!",
+                    ephemeral=True
+                )
+                return
+        
         embed = discord.Embed(
             title="⚠️ Система выговоров",
             description="Управление выговорами и модерация сервера",
@@ -2407,6 +2425,16 @@ class Panel(commands.Cog):
 
     @discord.app_commands.command(name="panel", description="🎛️ Панель управления ALFA Bot")
     async def panel(self, interaction: discord.Interaction):
+        # Проверка прав: администратор или в whitelist
+        if not interaction.user.guild_permissions.administrator:
+            if not self.bot.db.is_whitelisted(interaction.guild.id, interaction.user.id):
+                await interaction.response.send_message(
+                    "❌ У вас нет прав для использования панели управления!\n"
+                    "Панель доступна только администраторам и пользователям в whitelist.",
+                    ephemeral=True
+                )
+                return
+        
         embed = discord.Embed(
             title="🎛️ ALFA Bot Control Panel",
             description="Добро пожаловать в панель управления!\nВыберите нужный раздел, нажав на кнопку ниже.",
