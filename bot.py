@@ -30,7 +30,9 @@ class DiscordBot(commands.Bot):
             'cogs.panel',
             'cogs.polls_extension',
             'cogs.drink_game',
-            'cogs.warnings'
+            'cogs.warnings',
+            # 'cogs.user_panel',
+            'cogs.role_manager',
         ]
         
         for cog in cogs_to_load:
