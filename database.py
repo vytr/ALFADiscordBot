@@ -11,6 +11,24 @@ class Database:
     def __init__(self, db_path='bot_database.db'):
         self.db_path = db_path
         self.init_db()
+        # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: закрываем зависшие сессии при старте
+        self._cleanup_on_init()
+
+    def _cleanup_on_init(self):
+        """Очистка при инициализации БД"""
+        print("🔧 Initializing database cleanup...")
+        
+        # Закрываем все зависшие сессии
+        hanging = self.close_hanging_voice_sessions(max_duration_hours=24)
+        if hanging > 0:
+            print(f"✅ Closed {hanging} hanging voice sessions")
+        
+        # Принудительно закрываем ВСЕ активные сессии (безопасный перезапуск)
+        active = self.force_end_all_voice_sessions()
+        if active > 0:
+            print(f"✅ Force closed {active} active voice sessions")
+        
+        print("✅ Database cleanup complete")
 
     def init_db(self):
         """Инициализация базы данных"""
@@ -92,7 +110,6 @@ class Database:
         ''')
 
         # Таблица времени в голосовых каналах (УПРОЩЕННАЯ - БЕЗ channel_id)
-        # Теперь просто считаем общее время в войсе, без разделения по каналам
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS user_voice_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -188,19 +205,17 @@ class Database:
     def create_poll(self, guild_id: int, channel_id: int, message_id: int,
                     question: str, options: list, emojis: list, created_by: int) -> str:
         """Создать новый опрос и вернуть его ID"""
-        poll_id = str(uuid.uuid4())[:8]  # Короткий ID
+        poll_id = str(uuid.uuid4())[:8]
 
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
-            # Сохраняем опрос
             cursor.execute('''
                 INSERT INTO polls (poll_id, guild_id, channel_id, message_id, question, created_by)
                 VALUES (?, ?, ?, ?, ?, ?)
             ''', (poll_id, guild_id, channel_id, message_id, question, created_by))
 
-            # Сохраняем варианты ответов
             for i, (option, emoji) in enumerate(zip(options, emojis)):
                 cursor.execute('''
                     INSERT INTO poll_options (poll_id, option_index, option_text, emoji)
@@ -283,7 +298,6 @@ class Database:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
-        # Получаем информацию об опросе
         cursor.execute('''
             SELECT question, is_closed FROM polls WHERE poll_id = ?
         ''', (poll_id,))
@@ -295,44 +309,24 @@ class Database:
 
         question, is_closed = poll_info
 
-        # Получаем варианты ответов
         options = self.get_poll_options(poll_id)
 
-        # Получаем результаты голосования
         cursor.execute('''
-            SELECT option_index, COUNT(*) as vote_count
-            FROM poll_votes
+            SELECT user_id, option_index, voted_at FROM poll_votes
             WHERE poll_id = ?
-            GROUP BY option_index
+            ORDER BY voted_at
         ''', (poll_id,))
-        votes = dict(cursor.fetchall())
+        
+        votes = cursor.fetchall()
+        conn.close()
 
-        # Общее количество голосов
-        total_votes = sum(votes.values())
-
-        # Формируем результаты
-        results = {
+        return {
             'poll_id': poll_id,
             'question': question,
             'is_closed': bool(is_closed),
-            'total_votes': total_votes,
-            'options': []
+            'options': options,
+            'votes': votes
         }
-
-        for idx, text, emoji in options:
-            vote_count = votes.get(idx, 0)
-            percentage = (vote_count / total_votes * 100) if total_votes > 0 else 0
-
-            results['options'].append({
-                'index': idx,
-                'text': text,
-                'emoji': emoji,
-                'votes': vote_count,
-                'percentage': percentage
-            })
-
-        conn.close()
-        return results
 
     def close_poll(self, poll_id: str) -> bool:
         """Закрыть опрос"""
@@ -373,7 +367,7 @@ class Database:
         cursor = conn.cursor()
 
         cursor.execute('''
-            SELECT poll_id, question, created_at, is_closed FROM polls
+            SELECT poll_id, question, created_by, created_at, is_closed FROM polls
             WHERE guild_id = ?
             AND created_at >= datetime('now', '-' || ? || ' days')
             ORDER BY created_at DESC
@@ -389,7 +383,7 @@ class Database:
         cursor = conn.cursor()
 
         cursor.execute('''
-            SELECT poll_id, question, created_at, is_closed FROM polls
+            SELECT poll_id, question, created_by, created_at, is_closed FROM polls
             WHERE guild_id = ?
             ORDER BY created_at DESC
         ''', (guild_id,))
@@ -427,46 +421,43 @@ class Database:
         output = StringIO()
         writer = csv.writer(output)
 
-        # Заголовок
         writer.writerow(['Poll Results Export'])
         writer.writerow(['Poll ID:', poll_id])
         writer.writerow(['Question:', results['question']])
         writer.writerow(['Status:', 'Closed' if results['is_closed'] else 'Open'])
-        writer.writerow(['Total Votes:', results['total_votes']])
         writer.writerow([])
 
-        # Результаты
+        # Подсчитываем голоса
+        votes_by_option = {}
+        total_votes = 0
+        for user_id, option_index, voted_at in results['votes']:
+            votes_by_option[option_index] = votes_by_option.get(option_index, 0) + 1
+            total_votes += 1
+
+        writer.writerow(['Total Votes:', total_votes])
+        writer.writerow([])
+
         writer.writerow(['Option', 'Votes', 'Percentage'])
-        for option in results['options']:
+        for option_index, option_text, emoji in results['options']:
+            vote_count = votes_by_option.get(option_index, 0)
+            percentage = (vote_count / total_votes * 100) if total_votes > 0 else 0
             writer.writerow([
-                f"{option['emoji']} {option['text']}",
-                option['votes'],
-                f"{option['percentage']:.1f}%"
+                f"{emoji} {option_text}",
+                vote_count,
+                f"{percentage:.1f}%"
             ])
 
-        # Детали голосов (кто как проголосовал)
+        # Детали голосов
         if guild:
             writer.writerow([])
             writer.writerow(['Detailed Votes'])
             writer.writerow(['User', 'Choice'])
 
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute('''
-                SELECT user_id, option_index FROM poll_votes
-                WHERE poll_id = ?
-                ORDER BY voted_at
-            ''', (poll_id,))
-
-            votes = cursor.fetchall()
-            conn.close()
-
-            for user_id, option_idx in votes:
+            for user_id, option_index, voted_at in results['votes']:
                 member = guild.get_member(user_id)
                 username = member.display_name if member else f"Unknown (ID: {user_id})"
-                option = results['options'][option_idx]
-                writer.writerow([username, f"{option['emoji']} {option['text']}"])
+                option = results['options'][option_index]
+                writer.writerow([username, f"{option[2]} {option[1]}"])
 
         return output.getvalue()
 
@@ -489,15 +480,24 @@ class Database:
             writer.writerow(['Poll ID:', poll_id])
             writer.writerow(['Question:', results['question']])
             writer.writerow(['Status:', 'Closed' if results['is_closed'] else 'Open'])
-            writer.writerow(['Total Votes:', results['total_votes']])
+            
+            votes_by_option = {}
+            total_votes = 0
+            for user_id, option_index, voted_at in results['votes']:
+                votes_by_option[option_index] = votes_by_option.get(option_index, 0) + 1
+                total_votes += 1
+            
+            writer.writerow(['Total Votes:', total_votes])
             writer.writerow([])
 
             writer.writerow(['Option', 'Votes', 'Percentage'])
-            for option in results['options']:
+            for option_index, option_text, emoji in results['options']:
+                vote_count = votes_by_option.get(option_index, 0)
+                percentage = (vote_count / total_votes * 100) if total_votes > 0 else 0
                 writer.writerow([
-                    f"{option['emoji']} {option['text']}",
-                    option['votes'],
-                    f"{option['percentage']:.1f}%"
+                    f"{emoji} {option_text}",
+                    vote_count,
+                    f"{percentage:.1f}%"
                 ])
 
             writer.writerow([])
@@ -512,7 +512,6 @@ class Database:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
-            # Обновляем общую статистику
             cursor.execute('''
                 INSERT INTO user_stats_total (guild_id, user_id, total_messages)
                 VALUES (?, ?, 1)
@@ -520,7 +519,6 @@ class Database:
                 total_messages = total_messages + 1
             ''', (guild_id, user_id))
 
-            # Обновляем дневную статистику
             cursor.execute('''
                 INSERT INTO user_messages_daily (guild_id, user_id, message_date, message_count)
                 VALUES (?, ?, DATE('now'), 1)
@@ -535,18 +533,15 @@ class Database:
             print(f"Error logging message: {e}")
             return False
 
-    # ========== ИСПРАВЛЕННЫЕ МЕТОДЫ ДЛЯ ГОЛОСОВЫХ КАНАЛОВ ==========
+    # ========== ГОЛОСОВЫЕ СЕССИИ ==========
 
     def start_voice_session(self, guild_id: int, user_id: int):
-        """
-        Начать голосовую сессию (УПРОЩЕННАЯ ВЕРСИЯ без channel_id)
-        Сначала проверяем, нет ли уже активной сессии
-        """
+        """Начать голосовую сессию"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
-            # Проверяем, есть ли уже открытая сессия для этого пользователя
+            # Проверяем, есть ли уже открытая сессия
             cursor.execute('''
                 SELECT id FROM user_voice_sessions
                 WHERE guild_id = ? AND user_id = ? AND leave_time IS NULL
@@ -555,12 +550,10 @@ class Database:
             existing_session = cursor.fetchone()
             
             if existing_session:
-                # Уже есть открытая сессия - не создаем дубликат
                 print(f"⚠️ User {user_id} already has an active voice session")
                 conn.close()
                 return existing_session[0]
 
-            # Создаем новую сессию
             cursor.execute('''
                 INSERT INTO user_voice_sessions (guild_id, user_id, join_time)
                 VALUES (?, ?, CURRENT_TIMESTAMP)
@@ -577,15 +570,11 @@ class Database:
             return None
 
     def end_voice_session(self, guild_id: int, user_id: int):
-        """
-        Закончить голосовую сессию (УПРОЩЕННАЯ ВЕРСИЯ без channel_id)
-        Ищем любую открытую сессию для пользователя
-        """
+        """Закончить голосовую сессию"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
-            # Находим ЛЮБУЮ незавершенную сессию для этого пользователя
             cursor.execute('''
                 SELECT id, join_time FROM user_voice_sessions
                 WHERE guild_id = ? AND user_id = ? AND leave_time IS NULL
@@ -600,7 +589,6 @@ class Database:
 
             session_id, join_time = session
 
-            # Обновляем сессию
             cursor.execute('''
                 UPDATE user_voice_sessions
                 SET leave_time = CURRENT_TIMESTAMP,
@@ -608,7 +596,6 @@ class Database:
                 WHERE id = ?
             ''', (session_id,))
 
-            # Получаем длительность
             cursor.execute('SELECT duration FROM user_voice_sessions WHERE id = ?', (session_id,))
             duration = cursor.fetchone()[0]
 
@@ -618,7 +605,7 @@ class Database:
                 conn.close()
                 return False
 
-            # Обновляем общую статистику
+            # Обновляем статистику
             cursor.execute('''
                 INSERT INTO user_stats_total (guild_id, user_id, total_voice_time)
                 VALUES (?, ?, ?)
@@ -626,7 +613,6 @@ class Database:
                 total_voice_time = total_voice_time + ?
             ''', (guild_id, user_id, int(duration), int(duration)))
 
-            # Обновляем дневную статистику
             cursor.execute('''
                 INSERT INTO user_voice_daily (guild_id, user_id, voice_date, voice_time)
                 VALUES (?, ?, DATE('now'), ?)
@@ -644,18 +630,11 @@ class Database:
             return False
 
     def close_hanging_voice_sessions(self, max_duration_hours: int = 24):
-        """
-        НОВЫЙ МЕТОД: Закрыть все "зависшие" голосовые сессии
-        Вызывать при запуске бота для очистки незакрытых сессий
-        
-        Args:
-            max_duration_hours: Максимальная разумная длительность сессии в часах
-        """
+        """Закрыть все зависшие голосовые сессии"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
-            # Находим все незакрытые сессии старше max_duration_hours
             cursor.execute('''
                 SELECT id, guild_id, user_id, join_time 
                 FROM user_voice_sessions
@@ -667,15 +646,12 @@ class Database:
             
             if not hanging_sessions:
                 conn.close()
-                print("✅ No hanging voice sessions found")
                 return 0
 
             closed_count = 0
             for session_id, guild_id, user_id, join_time in hanging_sessions:
-                # Вычисляем максимальную разумную длительность
                 max_duration_seconds = max_duration_hours * 3600
                 
-                # Закрываем сессию с максимальной длительностью
                 cursor.execute('''
                     UPDATE user_voice_sessions
                     SET leave_time = datetime(join_time, '+' || ? || ' hours'),
@@ -683,7 +659,6 @@ class Database:
                     WHERE id = ?
                 ''', (max_duration_hours, max_duration_seconds, session_id))
 
-                # Обновляем статистику
                 cursor.execute('''
                     INSERT INTO user_stats_total (guild_id, user_id, total_voice_time)
                     VALUES (?, ?, ?)
@@ -697,20 +672,13 @@ class Database:
             conn.commit()
             conn.close()
             
-            print(f"✅ Closed {closed_count} hanging voice sessions")
             return closed_count
         except Exception as e:
             print(f"❌ Error closing hanging sessions: {e}")
             return 0
 
     def force_end_all_voice_sessions(self, guild_id: int = None):
-        """
-        НОВЫЙ МЕТОД: Принудительно закрыть ВСЕ активные голосовые сессии
-        Полезно при перезапуске бота
-        
-        Args:
-            guild_id: ID сервера (если None - закрывает для всех серверов)
-        """
+        """Принудительно закрыть ВСЕ активные голосовые сессии"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -732,12 +700,10 @@ class Database:
             
             if not active_sessions:
                 conn.close()
-                print("✅ No active voice sessions to close")
                 return 0
 
             closed_count = 0
             for session_id, g_id, user_id, join_time in active_sessions:
-                # Вычисляем длительность до текущего момента
                 cursor.execute('''
                     UPDATE user_voice_sessions
                     SET leave_time = CURRENT_TIMESTAMP,
@@ -745,12 +711,10 @@ class Database:
                     WHERE id = ?
                 ''', (session_id,))
 
-                # Получаем длительность
                 cursor.execute('SELECT duration FROM user_voice_sessions WHERE id = ?', (session_id,))
                 duration = cursor.fetchone()[0]
 
                 if duration and duration > 0:
-                    # Обновляем статистику
                     cursor.execute('''
                         INSERT INTO user_stats_total (guild_id, user_id, total_voice_time)
                         VALUES (?, ?, ?)
@@ -764,17 +728,13 @@ class Database:
             conn.commit()
             conn.close()
             
-            print(f"✅ Force closed {closed_count} active voice sessions")
             return closed_count
         except Exception as e:
             print(f"❌ Error force closing sessions: {e}")
             return 0
 
     def get_active_voice_sessions(self, guild_id: int = None) -> list:
-        """
-        НОВЫЙ МЕТОД: Получить список всех активных голосовых сессий
-        Полезно для диагностики
-        """
+        """Получить список всех активных голосовых сессий"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -803,29 +763,24 @@ class Database:
             print(f"❌ Error getting active sessions: {e}")
             return []
 
-    # ========== КОНЕЦ ИСПРАВЛЕННЫХ МЕТОДОВ ==========
-
     def cleanup_old_data(self):
         """Удалить данные старше 30 дней"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
-            # Удаляем старые записи сообщений
             cursor.execute('''
                 DELETE FROM user_messages_daily
                 WHERE message_date < DATE('now', '-30 days')
             ''')
             deleted_messages = cursor.rowcount
 
-            # Удаляем старые голосовые сессии
             cursor.execute('''
                 DELETE FROM user_voice_sessions
                 WHERE join_time < DATETIME('now', '-30 days')
             ''')
             deleted_voice = cursor.rowcount
 
-            # Удаляем старые дневные записи войса
             cursor.execute('''
                 DELETE FROM user_voice_daily
                 WHERE voice_date < DATE('now', '-30 days')
@@ -843,11 +798,10 @@ class Database:
             return 0
 
     def get_user_stats(self, guild_id: int, user_id: int, days: int = None) -> dict:
-        """Получить статистику пользователя (УПРОЩЕННАЯ ВЕРСИЯ без разбивки по каналам)"""
+        """Получить статистику пользователя"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
-        # Общая статистика
         cursor.execute('''
             SELECT total_messages, total_voice_time FROM user_stats_total
             WHERE guild_id = ? AND user_id = ?
@@ -860,7 +814,6 @@ class Database:
 
         total_messages, total_voice_time = total_stats
 
-        # Сообщения за период
         if days:
             cursor.execute('''
                 SELECT SUM(message_count) FROM user_messages_daily
@@ -871,7 +824,6 @@ class Database:
         else:
             period_messages = total_messages
 
-        # Время в голосовых каналах за период (УПРОЩЕННОЕ)
         if days:
             cursor.execute('''
                 SELECT SUM(voice_time) FROM user_voice_daily
@@ -889,7 +841,7 @@ class Database:
             'total_voice_time': total_voice_time or 0,
             'period_messages': period_messages,
             'period_voice_time': int(period_voice_time),
-            'voice_by_channel': []  # Больше не используется, но оставляем для совместимости
+            'voice_by_channel': []
         }
 
     def get_all_users_stats(self, guild_id: int, days: int = None) -> list:
@@ -897,7 +849,6 @@ class Database:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
-        # Получаем всех пользователей с общей статистикой
         cursor.execute('''
             SELECT user_id, total_messages, total_voice_time
             FROM user_stats_total
@@ -914,7 +865,6 @@ class Database:
         result = []
 
         for user_id, total_messages, total_voice_time in users_total:
-            # Сообщения за период
             if days:
                 cursor.execute('''
                     SELECT SUM(message_count) FROM user_messages_daily
@@ -925,7 +875,6 @@ class Database:
             else:
                 period_messages = total_messages
 
-            # Время в голосовых за период (УПРОЩЕННОЕ)
             if days:
                 cursor.execute('''
                     SELECT SUM(voice_time) FROM user_voice_daily

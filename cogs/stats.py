@@ -17,13 +17,6 @@ class Stats(commands.Cog):
     def cog_unload(self):
         self.cleanup_task.cancel()
 
-    async def setup_hook(self):
-        """Вызывается при загрузке cog - закрываем зависшие сессии"""
-        print("🔧 Closing hanging voice sessions...")
-        closed = self.db.close_hanging_voice_sessions(max_duration_hours=24)
-        if closed > 0:
-            print(f"✅ Closed {closed} hanging voice sessions")
-
     @tasks.loop(hours=24)
     async def cleanup_task(self):
         """Ежедневная очистка старых данных"""
@@ -42,21 +35,17 @@ class Stats(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message):
         """Отслеживание сообщений"""
-        # Игнорируем сообщения от ботов
         if message.author.bot:
             return
 
-        # Игнорируем DM
         if not message.guild:
             return
 
-        # Логируем сообщение
         self.db.log_message(message.guild.id, message.author.id)
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
-        """Отслеживание активности в голосовых каналах (УПРОЩЕННАЯ ВЕРСИЯ)"""
-        # Игнорируем ботов
+        """Отслеживание активности в голосовых каналах"""
         if member.bot:
             return
 
@@ -74,9 +63,7 @@ class Stats(commands.Cog):
             print(f"Voice session ended: {member.name} <- {before.channel.name}")
 
         # Пользователь переключился между каналами
-        # В упрощенной версии ничего не делаем - продолжаем считать ту же сессию
         elif before.channel is not None and after.channel is not None and before.channel.id != after.channel.id:
-            # Просто логируем переключение
             print(f"Voice channel switched: {member.name} {before.channel.name} -> {after.channel.name}")
 
     @commands.command(name='alfa_stats')
@@ -85,16 +72,13 @@ class Stats(commands.Cog):
         """Показать статистику пользователя. Формат: !alfa_stats [@user] [7/14/30]"""
         await ctx.message.delete()
 
-        # Если пользователь не указан - показываем статистику автора
         if member is None:
             member = ctx.author
 
-        # Проверяем допустимость дней
         if days and days not in [7, 14, 30]:
             await ctx.send("❌ Допустимые периоды: 7, 14 или 30 дней")
             return
 
-        # Используем вспомогательный метод
         embed = await self.get_user_stats_embed(ctx.guild, member, days)
         
         if not embed:
@@ -109,16 +93,13 @@ class Stats(commands.Cog):
         """Экспортировать статистику в CSV. Формат: !alfa_stats_export [@user] [7/14/30]"""
         await ctx.message.delete()
 
-        # Если пользователь не указан - показываем статистику автора
         if member is None:
             member = ctx.author
 
-        # Проверяем допустимость дней
         if days and days not in [7, 14, 30]:
             await ctx.send("❌ Допустимые периоды: 7, 14 или 30 дней")
             return
 
-        # Получаем статистику
         stats = self.db.get_user_stats(ctx.guild.id, member.id, days)
 
         if not stats:
@@ -152,7 +133,6 @@ class Stats(commands.Cog):
 
         csv_data = output.getvalue()
 
-        # Создаем файл
         file = discord.File(
             io.BytesIO(csv_data.encode('utf-8-sig')),
             filename=f'user_stats_{member.display_name}_{period_text}.csv'
@@ -170,7 +150,6 @@ class Stats(commands.Cog):
             await ctx.send("❌ Допустимые периоды: 7, 14 или 30 дней", delete_after=10)
             return
 
-        # Используем вспомогательный метод
         embed = await self.get_leaderboard_embed(ctx.guild, days)
         
         if not embed:
@@ -189,23 +168,18 @@ class Stats(commands.Cog):
             await ctx.send("❌ Допустимые периоды: 7, 14 или 30 дней", delete_after=10)
             return
 
-        # Получаем всех участников (исключая ботов)
         all_members = [m for m in ctx.guild.members if not m.bot]
         
-        # Фильтруем по роли если указана
         if role:
             all_members = [m for m in all_members if role in m.roles]
 
-        # Получаем статистику
         all_stats = self.db.get_all_users_stats(ctx.guild.id, days)
 
-        # Находим ID активных пользователей
         active_user_ids = {
             stat['user_id'] for stat in all_stats 
             if stat['period_messages'] > 0 or stat['period_voice_time'] > 0
         }
 
-        # Находим неактивных
         inactive_members = [m for m in all_members if m.id not in active_user_ids]
 
         if not inactive_members:
@@ -213,7 +187,6 @@ class Stats(commands.Cog):
             await ctx.send(f"✅ Все участники{role_text} активны за последние {days} дней!", delete_after=10)
             return
 
-        # Формируем embed
         title_suffix = f" (роль: {role.name})" if role else ""
         embed = discord.Embed(
             title=f"😴 Неактивные участники{title_suffix}",
@@ -222,7 +195,6 @@ class Stats(commands.Cog):
             timestamp=datetime.utcnow()
         )
 
-        # Разбиваем на чанки по 20 пользователей
         chunk_size = 20
         for i in range(0, len(inactive_members), chunk_size):
             chunk = inactive_members[i:i + chunk_size]
@@ -249,34 +221,27 @@ class Stats(commands.Cog):
             await ctx.send("❌ Допустимые периоды: 7, 14 или 30 дней", delete_after=10)
             return
         
-        # Получаем всех участников (исключая ботов)
         all_members = [m for m in ctx.guild.members if not m.bot]
         
-        # Фильтруем по роли если указана
         if role:
             all_members = [m for m in all_members if role in m.roles]
         
-        # Получаем статистику
         all_stats = self.db.get_all_users_stats(ctx.guild.id, days)
         
-        # Фильтруем статистику по роли
         if role:
             filtered_user_ids = {m.id for m in all_members}
             all_stats = [s for s in all_stats if s['user_id'] in filtered_user_ids]
         
-        # Считаем активность
-        very_active = [s for s in all_stats if s['period_messages'] >= 100 or s['period_voice_time'] >= 3600*10]  # 100+ сообщений или 10+ часов
-        active = [s for s in all_stats if (s['period_messages'] >= 20 or s['period_voice_time'] >= 3600*2) and s not in very_active]  # 20+ сообщений или 2+ часов
+        very_active = [s for s in all_stats if s['period_messages'] >= 100 or s['period_voice_time'] >= 3600*10]
+        active = [s for s in all_stats if (s['period_messages'] >= 20 or s['period_voice_time'] >= 3600*2) and s not in very_active]
         low_active = [s for s in all_stats if (s['period_messages'] > 0 or s['period_voice_time'] > 0) and s not in very_active and s not in active]
         
         active_user_ids = {stat['user_id'] for stat in all_stats if stat['period_messages'] > 0 or stat['period_voice_time'] > 0}
         inactive_members = [m for m in all_members if m.id not in active_user_ids]
         
-        # Общая статистика
         total_messages = sum(s['period_messages'] for s in all_stats)
         total_voice_time = sum(s['period_voice_time'] for s in all_stats)
         
-        # Формируем embed
         title_suffix = f" (роль: {role.name})" if role else ""
         embed = discord.Embed(
             title=f"📊 Сводка активности сервера{title_suffix}",
@@ -285,7 +250,6 @@ class Stats(commands.Cog):
             timestamp=datetime.utcnow()
         )
         
-        # Общие цифры
         embed.add_field(
             name="📈 Общая активность",
             value=f"**Сообщений:** {total_messages:,}\n**Время в войсе:** {int(total_voice_time // 3600)}ч {int((total_voice_time % 3600) // 60)}м",
@@ -298,14 +262,12 @@ class Stats(commands.Cog):
             inline=True
         )
         
-        # Разбивка по уровням активности
         embed.add_field(
             name="🎯 Уровни активности",
             value=f"🔥 **Очень активные:** {len(very_active)}\n⚡ **Активные:** {len(active)}\n💬 **Низкая активность:** {len(low_active)}\n😴 **Неактивные:** {len(inactive_members)}",
             inline=False
         )
         
-        # Процентное соотношение
         total = len(all_members)
         if total > 0:
             very_active_pct = len(very_active) / total * 100
@@ -313,7 +275,6 @@ class Stats(commands.Cog):
             low_active_pct = len(low_active) / total * 100
             inactive_pct = len(inactive_members) / total * 100
             
-            # Визуальная диаграмма
             bar_length = 20
             very_bar = int(very_active_pct / 100 * bar_length)
             active_bar = int(active_pct / 100 * bar_length)
@@ -331,7 +292,6 @@ class Stats(commands.Cog):
                 inline=False
             )
         
-        # Топ-3 самых активных
         if all_stats:
             top_messages = sorted(all_stats, key=lambda x: x['period_messages'], reverse=True)[:3]
             top_text = []
@@ -362,14 +322,12 @@ class Stats(commands.Cog):
             await ctx.send("❌ Допустимые периоды: 7, 14 или 30 дней", delete_after=10)
             return
 
-        # Получаем статистику
         all_stats = self.db.get_all_users_stats(ctx.guild.id, days)
 
         if not all_stats:
             await ctx.send("📊 Нет данных для экспорта", delete_after=10)
             return
         
-        # Фильтруем по роли если указана
         if role:
             filtered_stats = []
             for stat in all_stats:
@@ -382,7 +340,6 @@ class Stats(commands.Cog):
             await ctx.send(f"📊 Нет данных для роли {role.mention}", delete_after=10)
             return
 
-        # Формируем CSV
         output = StringIO()
         writer = csv.writer(output)
 
@@ -416,7 +373,6 @@ class Stats(commands.Cog):
                 display_name = member.display_name
                 top_role = member.top_role.name if member.top_role.name != "@everyone" else "No Role"
                 
-                # Все роли (кроме @everyone)
                 all_roles = ", ".join([r.name for r in member.roles if r.name != "@everyone"])
                 if not all_roles:
                     all_roles = "No Roles"
@@ -441,7 +397,6 @@ class Stats(commands.Cog):
 
         csv_data = output.getvalue()
 
-        # Создаем файл
         role_suffix = f"_role_{role.name}" if role else ""
         file = discord.File(
             io.BytesIO(csv_data.encode('utf-8-sig')),
@@ -461,13 +416,9 @@ class Stats(commands.Cog):
         if not all_stats:
             return None
         
-        # Сортируем по сообщениям
         top_messages = sorted(all_stats, key=lambda x: x['period_messages'], reverse=True)[:10]
-        
-        # Сортируем по времени в войсе
         top_voice = sorted(all_stats, key=lambda x: x['period_voice_time'], reverse=True)[:10]
         
-        # Создаем единый embed
         embed = discord.Embed(
             title=f"🏆 Топ пользователей сервера",
             description=f"Рейтинг за последние {days} дней",
@@ -475,7 +426,6 @@ class Stats(commands.Cog):
             timestamp=datetime.utcnow()
         )
         
-        # Топ по сообщениям
         messages_text = []
         for i, user_data in enumerate(top_messages, 1):
             member = guild.get_member(user_data['user_id'])
@@ -490,7 +440,6 @@ class Stats(commands.Cog):
                 inline=False
             )
         
-        # Топ по времени в войсе
         voice_text = []
         for i, user_data in enumerate(top_voice, 1):
             member = guild.get_member(user_data['user_id'])
@@ -518,7 +467,6 @@ class Stats(commands.Cog):
         if not stats:
             return None
         
-        # Формируем embed
         period_text = f"за последние {days} дней" if days else "за все время"
         embed = discord.Embed(
             title=f"📊 Статистика {user.display_name}",
@@ -529,7 +477,6 @@ class Stats(commands.Cog):
         
         embed.set_thumbnail(url=user.display_avatar.url)
         
-        # Сообщения
         if days:
             embed.add_field(
                 name="💬 Сообщения",
@@ -543,7 +490,6 @@ class Stats(commands.Cog):
                 inline=False
             )
         
-        # Голосовые каналы
         voice_time_period = stats['period_voice_time']
         hours_period = int(voice_time_period // 3600)
         minutes_period = int((voice_time_period % 3600) // 60)
@@ -563,181 +509,6 @@ class Stats(commands.Cog):
                 value=f"**Всего:** {hours_total}ч {minutes_total}м",
                 inline=False
             )
-        
-        return embed
-    
-    async def get_inactive_users_embed(self, guild, days: int, role: discord.Role = None) -> discord.Embed:
-        """Получить embed с неактивными пользователями"""
-        # Получаем всех участников (исключая ботов)
-        all_members = [m for m in guild.members if not m.bot]
-        
-        # Фильтруем по роли если указана
-        if role:
-            all_members = [m for m in all_members if role in m.roles]
-        
-        # Получаем статистику
-        all_stats = self.db.get_all_users_stats(guild.id, days)
-        
-        # Находим ID активных пользователей
-        active_user_ids = {
-            stat['user_id'] for stat in all_stats 
-            if stat['period_messages'] > 0 or stat['period_voice_time'] > 0
-        }
-        
-        # Находим неактивных
-        inactive_members = [m for m in all_members if m.id not in active_user_ids]
-        
-        if not inactive_members:
-            return None
-        
-        # Формируем embed
-        title_suffix = f" (роль: {role.name})" if role else ""
-        embed = discord.Embed(
-            title=f"😴 Неактивные участники{title_suffix}",
-            description=f"Участники без активности за последние **{days} дней**",
-            color=0xE67E22,
-            timestamp=datetime.utcnow()
-        )
-        
-        # Список неактивных (максимум 25)
-        inactive_text = []
-        for i, member in enumerate(inactive_members[:25], 1):
-            top_role = member.top_role.name if member.top_role.name != "@everyone" else "Нет роли"
-            inactive_text.append(f"{i}. {member.mention} • `{top_role}`")
-        
-        if inactive_text:
-            if len(inactive_members) <= 25:
-                embed.add_field(
-                    name=f"👥 Список ({len(inactive_members)} пользователей)",
-                    value="\n".join(inactive_text),
-                    inline=False
-                )
-            else:
-                embed.add_field(
-                    name=f"👥 Первые 25 из {len(inactive_members)}",
-                    value="\n".join(inactive_text),
-                    inline=False
-                )
-        
-        # Статистика
-        total_members = len(all_members)
-        inactive_percent = (len(inactive_members) / total_members * 100) if total_members > 0 else 0
-        
-        embed.add_field(
-            name="📊 Статистика",
-            value=f"**Всего участников:** {total_members}\n**Неактивных:** {len(inactive_members)} ({inactive_percent:.1f}%)\n**Активных:** {len(active_user_ids)} ({100-inactive_percent:.1f}%)",
-            inline=False
-        )
-        
-        embed.set_footer(text="💡 Нажмите кнопку ниже для экспорта полного списка")
-        
-        return embed
-    
-    async def get_activity_summary_embed(self, guild, days: int, role: discord.Role = None) -> discord.Embed:
-        """Получить embed со сводкой активности"""
-        # Получаем всех участников (исключая ботов)
-        all_members = [m for m in guild.members if not m.bot]
-        
-        # Фильтруем по роли если указана
-        if role:
-            all_members = [m for m in all_members if role in m.roles]
-        
-        # Получаем статистику
-        all_stats = self.db.get_all_users_stats(guild.id, days)
-        
-        # Фильтруем статистику по роли
-        if role:
-            filtered_user_ids = {m.id for m in all_members}
-            all_stats = [s for s in all_stats if s['user_id'] in filtered_user_ids]
-        
-        # Считаем активность
-        very_active = [s for s in all_stats if s['period_messages'] >= 100 or s['period_voice_time'] >= 3600*10]
-        active = [s for s in all_stats if (s['period_messages'] >= 20 or s['period_voice_time'] >= 3600*2) and s not in very_active]
-        low_active = [s for s in all_stats if (s['period_messages'] > 0 or s['period_voice_time'] > 0) and s not in very_active and s not in active]
-        
-        active_user_ids = {stat['user_id'] for stat in all_stats if stat['period_messages'] > 0 or stat['period_voice_time'] > 0}
-        inactive_members = [m for m in all_members if m.id not in active_user_ids]
-        
-        # Общая статистика
-        total_messages = sum(s['period_messages'] for s in all_stats)
-        total_voice_time = sum(s['period_voice_time'] for s in all_stats)
-        
-        # Формируем embed
-        title_suffix = f" (роль: {role.name})" if role else ""
-        embed = discord.Embed(
-            title=f"📊 Сводка активности сервера{title_suffix}",
-            description=f"Анализ активности за последние **{days} дней**",
-            color=0x3498DB,
-            timestamp=datetime.utcnow()
-        )
-        
-        # Общие цифры
-        embed.add_field(
-            name="📈 Общая активность",
-            value=f"**Сообщений:** {total_messages:,}\n**Время в войсе:** {int(total_voice_time // 3600)}ч {int((total_voice_time % 3600) // 60)}м",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="👥 Участники",
-            value=f"**Всего:** {len(all_members)}\n**Активных:** {len(active_user_ids)}",
-            inline=True
-        )
-        
-        # Пустое поле для выравнивания
-        embed.add_field(name="\u200b", value="\u200b", inline=True)
-        
-        # Разбивка по уровням активности
-        embed.add_field(
-            name="🎯 Уровни активности",
-            value=f"🔥 **Очень активные:** {len(very_active)}\n⚡ **Активные:** {len(active)}\n💬 **Низкая активность:** {len(low_active)}\n😴 **Неактивные:** {len(inactive_members)}",
-            inline=False
-        )
-        
-        # Процентное соотношение
-        total = len(all_members)
-        if total > 0:
-            very_active_pct = len(very_active) / total * 100
-            active_pct = len(active) / total * 100
-            low_active_pct = len(low_active) / total * 100
-            inactive_pct = len(inactive_members) / total * 100
-            
-            # Визуальная диаграмма
-            bar_length = 20
-            very_bar = int(very_active_pct / 100 * bar_length)
-            active_bar = int(active_pct / 100 * bar_length)
-            low_bar = int(low_active_pct / 100 * bar_length)
-            inactive_bar = bar_length - very_bar - active_bar - low_bar
-            
-            visual = f"🔥 `{'█' * very_bar}{'░' * (bar_length - very_bar)}` {very_active_pct:.1f}%\n"
-            visual += f"⚡ `{'█' * active_bar}{'░' * (bar_length - active_bar)}` {active_pct:.1f}%\n"
-            visual += f"💬 `{'█' * low_bar}{'░' * (bar_length - low_bar)}` {low_active_pct:.1f}%\n"
-            visual += f"😴 `{'█' * inactive_bar}{'░' * (bar_length - inactive_bar)}` {inactive_pct:.1f}%"
-            
-            embed.add_field(
-                name="📊 Распределение активности",
-                value=visual,
-                inline=False
-            )
-        
-        # Топ-3 самых активных
-        if all_stats:
-            top_messages = sorted(all_stats, key=lambda x: x['period_messages'], reverse=True)[:3]
-            top_text = []
-            for i, user_data in enumerate(top_messages, 1):
-                member = guild.get_member(user_data['user_id'])
-                if member:
-                    emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉"
-                    top_text.append(f"{emoji} {member.mention}: {user_data['period_messages']} сообщений")
-            
-            if top_text:
-                embed.add_field(
-                    name="🏆 Топ-3 по сообщениям",
-                    value="\n".join(top_text),
-                    inline=False
-                )
-        
-        embed.set_footer(text=f"💡 Критерии: Очень активные (100+ сообщений или 10+ часов), Активные (20+ сообщений или 2+ часов)")
         
         return embed
 
@@ -775,8 +546,6 @@ class Stats(commands.Cog):
         
         await ctx.send(embed=embed)
 
+
 async def setup(bot):
-    cog = Stats(bot)
-    await bot.add_cog(cog)
-    # Вызываем setup_hook после добавления cog
-    await cog.setup_hook()
+    await bot.add_cog(Stats(bot))
