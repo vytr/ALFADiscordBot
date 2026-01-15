@@ -217,58 +217,61 @@ class Stats(commands.Cog):
             return
 
         # Получаем статистику всех пользователей
-        all_stats = self.db.get_all_users_stats(ctx.guild.id, days)
+        all_stats = self.bot.db.get_all_users_stats(ctx.guild.id, days)
 
         if not all_stats:
             await ctx.send("📊 Нет данных для отображения", delete_after=10)
             return
 
         # Сортируем по сообщениям
-        top_messages = sorted(all_stats, key=lambda x: x['period_messages'], reverse=True)[:20]
+        top_messages = sorted(all_stats, key=lambda x: x['period_messages'], reverse=True)[:10]
 
         # Сортируем по времени в войсе
-        top_voice = sorted(all_stats, key=lambda x: x['period_voice_time'], reverse=True)[:20]
+        top_voice = sorted(all_stats, key=lambda x: x['period_voice_time'], reverse=True)[:10]
 
-        # Создаем embed для сообщений
-        embed_messages = discord.Embed(
-            title=f"🏆 Топ по сообщениям (последние {days} дней)",
-            color=discord.Color.gold(),
+        # Создаем единый embed
+        embed = discord.Embed(
+            title=f"🏆 Топ пользователей сервера",
+            description=f"Рейтинг за последние {days} дней",
+            color=0xF1C40F,
             timestamp=datetime.utcnow()
         )
 
-        leaderboard_text = []
+        # Топ по сообщениям
+        messages_text = []
         for i, user_data in enumerate(top_messages, 1):
             member = ctx.guild.get_member(user_data['user_id'])
             if member:
-                emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"**{i}.**"
-                leaderboard_text.append(
-                    f"{emoji} {member.mention}: **{user_data['period_messages']}** сообщений"
-                )
+                emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "▫️"
+                messages_text.append(f"{emoji} **{member.display_name}**: {user_data['period_messages']} сообщений")
 
-        embed_messages.description = "\n".join(leaderboard_text)
+        if messages_text:
+            embed.add_field(
+                name="💬 Топ-10 по сообщениям",
+                value="\n".join(messages_text),
+                inline=False
+            )
 
-        # Создаем embed для войса
-        embed_voice = discord.Embed(
-            title=f"🎤 Топ по времени в войсе (последние {days} дней)",
-            color=discord.Color.blue(),
-            timestamp=datetime.utcnow()
-        )
-
-        leaderboard_voice = []
+        # Топ по времени в войсе
+        voice_text = []
         for i, user_data in enumerate(top_voice, 1):
             member = ctx.guild.get_member(user_data['user_id'])
             if member:
+                emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "▫️"
                 hours = int(user_data['period_voice_time'] // 3600)
                 minutes = int((user_data['period_voice_time'] % 3600) // 60)
-                emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"**{i}.**"
-                leaderboard_voice.append(
-                    f"{emoji} {member.mention}: **{hours}ч {minutes}м**"
-                )
+                voice_text.append(f"{emoji} **{member.display_name}**: {hours}ч {minutes}м")
 
-        embed_voice.description = "\n".join(leaderboard_voice)
+        if voice_text:
+            embed.add_field(
+                name="🎤 Топ-10 по времени в войсе",
+                value="\n".join(voice_text),
+                inline=False
+            )
 
-        await ctx.send(embed=embed_messages)
-        await ctx.send(embed=embed_voice)
+        embed.set_footer(text=f"Всего пользователей: {len(all_stats)}")
+
+        await ctx.send(embed=embed)
 
     @commands.command(name='alfa_inactive')
     @is_admin_or_whitelisted()

@@ -346,9 +346,6 @@ class StatsView(discord.ui.View):
             await interaction.response.send_message("📊 Нет данных о пользователях", ephemeral=True)
             return
 
-        # Ограничиваем до топ-10
-        display_stats = all_stats[:25]
-
         embed = discord.Embed(
             title=f"🏆 Топ пользователей сервера",
             description=f"Рейтинг за последние 7 дней",
@@ -357,7 +354,7 @@ class StatsView(discord.ui.View):
         )
 
         # Топ по сообщениям
-        messages_top = sorted(display_stats, key=lambda x: x['period_messages'], reverse=True)[:10]
+        messages_top = sorted(all_stats, key=lambda x: x['period_messages'], reverse=True)[:10]
         messages_text = []
         for i, user_data in enumerate(messages_top, 1):
             member = interaction.guild.get_member(user_data['user_id'])
@@ -373,7 +370,7 @@ class StatsView(discord.ui.View):
             )
 
         # Топ по времени в войсе
-        voice_top = sorted(display_stats, key=lambda x: x['period_voice_time'], reverse=True)[:10]
+        voice_top = sorted(all_stats, key=lambda x: x['period_voice_time'], reverse=True)[:10]
         voice_text = []
         for i, user_data in enumerate(voice_top, 1):
             member = interaction.guild.get_member(user_data['user_id'])
