@@ -484,6 +484,113 @@ class Database:
 
         return output.getvalue()
 
+    def export_poll_to_csv_detailed(self, poll_id: str, guild, days: int = 7) -> str:
+        """Экспортировать результаты опроса с детальной статистикой активности"""
+        results = self.get_poll_results(poll_id)
+        if not results or not guild:
+            return None
+
+        output = StringIO()
+        writer = csv.writer(output)
+
+        # Шапка
+        writer.writerow(['Poll Results Export (Detailed)'])
+        writer.writerow(['Poll ID:', poll_id])
+        writer.writerow(['Question:', results['question']])
+        writer.writerow(['Status:', 'Closed' if results['is_closed'] else 'Open'])
+        writer.writerow(['Period:', f'{days} days'])
+        writer.writerow([])
+
+        # Подсчитываем голоса и группируем по вариантам
+        votes_by_option = {}  # {option_index: [user_ids]}
+        total_votes = 0
+        
+        for user_id, option_index, voted_at in results['votes']:
+            if option_index not in votes_by_option:
+                votes_by_option[option_index] = []
+            votes_by_option[option_index].append(user_id)
+            total_votes += 1
+
+        writer.writerow(['Total Votes:', total_votes])
+        writer.writerow([])
+
+        # Статистика по вариантам
+        writer.writerow(['Option', 'Votes', 'Percentage'])
+        for option_index, option_text, emoji in results['options']:
+            vote_count = len(votes_by_option.get(option_index, []))
+            percentage = (vote_count / total_votes * 100) if total_votes > 0 else 0
+            writer.writerow([
+                f"{emoji} {option_text}",
+                vote_count,
+                f"{percentage:.1f}%"
+            ])
+
+        writer.writerow([])
+        writer.writerow([])
+
+        # Получаем статистику для всех проголосовавших
+        all_voters = set()
+        for voters in votes_by_option.values():
+            all_voters.update(voters)
+
+        # Получаем статистику активности для каждого пользователя
+        user_stats = {}
+        for user_id in all_voters:
+            stats = self.get_user_stats(guild.id, user_id, days)
+            if stats:
+                user_stats[user_id] = {
+                    'messages': stats['period_messages'],
+                    'voice_time': stats['period_voice_time']
+                }
+            else:
+                user_stats[user_id] = {'messages': 0, 'voice_time': 0}
+
+        # Сортируем голоса в каждом варианте по времени в войсе (по убыванию)
+        sorted_votes_by_option = {}
+        for option_index, voters in votes_by_option.items():
+            sorted_voters = sorted(
+                voters,
+                key=lambda uid: user_stats.get(uid, {}).get('voice_time', 0),
+                reverse=True
+            )
+            sorted_votes_by_option[option_index] = sorted_voters
+
+        # Заголовки колонок - названия вариантов
+        headers = []
+        for option_index, option_text, emoji in results['options']:
+            headers.append(f"{emoji} {option_text}")
+        writer.writerow(headers)
+
+        # Находим максимальное количество голосов в одном варианте
+        max_votes = max([len(sorted_votes_by_option.get(opt[0], [])) for opt in results['options']], default=0)
+
+        # Заполняем данные построчно
+        for row_index in range(max_votes):
+            row = []
+            for option_index, option_text, emoji in results['options']:
+                voters = sorted_votes_by_option.get(option_index, [])
+                
+                if row_index < len(voters):
+                    user_id = voters[row_index]
+                    member = guild.get_member(user_id)
+                    username = member.display_name if member else f"Unknown (ID: {user_id})"
+                    
+                    # Получаем статистику
+                    stats = user_stats.get(user_id, {'messages': 0, 'voice_time': 0})
+                    messages = stats['messages']
+                    voice_hours = int(stats['voice_time'] // 3600)
+                    voice_minutes = int((stats['voice_time'] % 3600) // 60)
+                    
+                    # Форматируем строку: "Username | 123 msg | 5h 30m"
+                    cell_value = f"{username} | {messages} msg | {voice_hours}h {voice_minutes}m"
+                    row.append(cell_value)
+                else:
+                    row.append('')  # Пустая ячейка
+            
+            writer.writerow(row)
+
+        return output.getvalue()
+
     def export_polls_to_csv(self, poll_ids: list, guild=None) -> str:
         """Экспортировать несколько опросов в один CSV"""
         output = StringIO()

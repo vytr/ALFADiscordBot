@@ -372,6 +372,59 @@ class Basic(commands.Cog):
         )
 
         await ctx.send(f"📊 Экспорт опроса `{poll_id}`", file=file)
+    
+    @commands.command(name='alfa_poll_export_detail')
+    @is_admin_or_whitelisted()
+    async def poll_export_detail(self, ctx, poll_id: str, days: int = 7):
+        """
+        Экспортировать опрос с детальной статистикой активности. 
+        Формат: !alfa_poll_export_detail ID [период_в_днях]
+        
+        Пример: !alfa_poll_export_detail abc123 7
+        """
+        await ctx.message.delete()
+        
+        # Проверяем период
+        if days not in [7, 14, 30]:
+            await ctx.send("❌ Допустимые периоды: 7, 14 или 30 дней", delete_after=10)
+            return
+        
+        # Получаем данные опроса с детальной статистикой
+        csv_data = self.db.export_poll_to_csv_detailed(poll_id, ctx.guild, days)
+
+        if not csv_data:
+            await ctx.send(f"❌ Опрос с ID `{poll_id}` не найден", delete_after=10)
+            return
+
+        # Создаем файл
+        file = discord.File(
+            io.BytesIO(csv_data.encode('utf-8-sig')),
+            filename=f'poll_{poll_id}_detailed_{days}days.csv'
+        )
+
+        embed = discord.Embed(
+            title="📊 Детальный экспорт опроса",
+            description=f"Опрос `{poll_id}` с статистикой активности за **{days} дней**",
+            color=0x3498DB,
+            timestamp=datetime.utcnow()
+        )
+        
+        embed.add_field(
+            name="📋 Что в файле?",
+            value=(
+                f"• Результаты голосования\n"
+                f"• Статистика активности каждого пользователя:\n"
+                f"  - Количество сообщений за {days} дней\n"
+                f"  - Время в голосовых каналах за {days} дней\n"
+                f"• Сортировка: по времени в войсе (больше → меньше)\n"
+                f"• Формат: Username | X msg | Yh Zm"
+            ),
+            inline=False
+        )
+        
+        embed.set_footer(text=f"Запросил: {ctx.author.name}")
+
+        await ctx.send(embed=embed, file=file)
 
     @commands.command(name='alfa_poll_export_batch')
     @is_admin_or_whitelisted()
