@@ -7,17 +7,20 @@ import traceback
 
 class DiscordBot(commands.Bot):
     def __init__(self):
+        # ВАЖНО: Для отслеживания опросов нужны эти intents!
         intents = discord.Intents.default()
         intents.message_content = True
         intents.members = True
+        intents.guilds = True           # ← КРИТИЧНО для poll events
+        intents.guild_messages = True   # ← КРИТИЧНО для poll events
 
         super().__init__(
             command_prefix=config.DISCORD_PREFIX,
             intents=intents,
-            help_command=None  # Отключаем стандартную help команду
+            help_command=None
         )
 
-        # Инициализация базы данных
+        # Инициализация базы данных (теперь с отдельной БД для опросов)
         self.db = Database()
 
     async def setup_hook(self):
@@ -30,9 +33,8 @@ class DiscordBot(commands.Bot):
             'cogs.panel',
             'cogs.polls_extension',
             'cogs.drink_game',
-            # 'cogs.user_panel',
-            # 'cogs.role_manager',
             'cogs.warnings',
+            'cogs.native_polls',  # ← НОВЫЙ COG для отслеживания опросов
         ]
         
         for cog in cogs_to_load:
@@ -52,6 +54,14 @@ class DiscordBot(commands.Bot):
         print(f'📌 ID: {self.user.id}')
         print('━━━━━━━━━━━━━━━━━━━━━━━━━━')
         
+        # Проверка intents
+        print("🔍 Проверка intents:")
+        print(f"   guilds: {self.intents.guilds}")
+        print(f"   guild_messages: {self.intents.guild_messages}")
+        print(f"   message_content: {self.intents.message_content}")
+        print(f"   members: {self.intents.members}")
+        print('━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        
         # Синхронизация команд
         try:
             print("⏳ Синхронизация slash команд...")
@@ -68,7 +78,8 @@ class DiscordBot(commands.Bot):
         await self.change_presence(
             activity=discord.Game(name=f"{config.DISCORD_PREFIX}help | /panel")
         )
-        print("✅ Бот готов к работе!\n")
+        print("✅ Бот готов к работе!")
+        print("📊 Отслеживание опросов активно!\n")
 
 async def main():
     bot = DiscordBot()

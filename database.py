@@ -8,9 +8,11 @@ from datetime import datetime, timedelta
 class Database:
     """Класс для работы с базой данных whitelist и опросов"""
 
-    def __init__(self, db_path='bot_database.db'):
+    def __init__(self, db_path='bot_database.db', polls_db_path='polls_database.db'):
         self.db_path = db_path
+        self.polls_db_path = polls_db_path
         self.init_db()
+        self.init_polls_db()
         # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: закрываем зависшие сессии при старте
         self._cleanup_on_init()
 
@@ -130,6 +132,35 @@ class Database:
                 voice_date DATE NOT NULL,
                 voice_time INTEGER DEFAULT 0,
                 UNIQUE(guild_id, user_id, voice_date)
+            )
+        ''')
+
+        # Таблица нативных Discord опросов
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS native_polls (
+                poll_id TEXT PRIMARY KEY,
+                guild_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                question TEXT NOT NULL,
+                options TEXT NOT NULL,
+                duration_hours INTEGER NOT NULL,
+                created_by INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_finalized INTEGER DEFAULT 0
+            )
+        ''')
+
+        # Таблица голосов в нативных опросах
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS native_poll_votes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                poll_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                answer_id INTEGER NOT NULL,
+                voted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (poll_id) REFERENCES native_polls(poll_id),
+                UNIQUE(poll_id, user_id, answer_id)
             )
         ''')
 
@@ -1025,3 +1056,649 @@ class Database:
 
         conn.close()
         return result
+
+
+    # ========== НАТИВНЫЕ DISCORD POLLS ==========
+
+    def create_native_poll(self, guild_id: int, channel_id: int, message_id: int,
+                          question: str, options: list, duration_hours: int, created_by: int) -> str:
+        """Создать запись о нативном Discord опросе"""
+        import uuid
+        import json
+        
+        poll_id = str(uuid.uuid4())[:8]
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            options_json = json.dumps(options, ensure_ascii=False)
+            
+            cursor.execute("""
+                INSERT INTO native_polls 
+                (poll_id, guild_id, channel_id, message_id, question, options, duration_hours, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (poll_id, guild_id, channel_id, message_id, question, options_json, duration_hours, created_by))
+            
+            conn.commit()
+            conn.close()
+            return poll_id
+        except Exception as e:
+            print(f"Error creating native poll: {e}")
+            return None
+
+    def get_native_poll(self, poll_id: str) -> dict:
+        """Получить информацию о нативном опросе"""
+        import json
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT poll_id, guild_id, channel_id, message_id, question, options, 
+                   duration_hours, created_by, created_at, is_finalized
+            FROM native_polls
+            WHERE poll_id = ?
+        """, (poll_id,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        if not result:
+            return None
+        
+        return {
+            "poll_id": result[0],
+            "guild_id": result[1],
+            "channel_id": result[2],
+            "message_id": result[3],
+            "question": result[4],
+            "options": json.loads(result[5]),
+            "duration_hours": result[6],
+            "created_by": result[7],
+            "created_at": result[8],
+            "is_finalized": bool(result[9])
+        }
+
+    def finalize_native_poll(self, poll_id: str) -> bool:
+        """Пометить опрос как завершенный"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE native_polls
+                SET is_finalized = 1
+                WHERE poll_id = ?
+            """, (poll_id,))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error finalizing poll: {e}")
+            return False
+
+    def get_native_polls_by_date(self, guild_id: int, days: int) -> list:
+        """Получить нативные опросы за последние N дней"""
+        import json
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT poll_id, question, created_by, created_at, is_finalized
+            FROM native_polls
+            WHERE guild_id = ?
+            AND created_at >= datetime("now", "-" || ? || " days")
+            ORDER BY created_at DESC
+        """, (guild_id, days))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        return [
+            {
+                "poll_id": r[0],
+                "question": r[1],
+                "created_by": r[2],
+                "created_at": r[3],
+                "is_finalized": bool(r[4])
+            }
+            for r in results
+        ]
+
+    def add_native_poll_vote(self, poll_id: str, user_id: int, answer_id: int) -> bool:
+        """Добавить голос в нативный опрос"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO native_poll_votes (poll_id, user_id, answer_id)
+                VALUES (?, ?, ?)
+            ''', (poll_id, user_id, answer_id))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error adding native poll vote: {e}")
+            return False
+
+    def remove_native_poll_vote(self, poll_id: str, user_id: int, answer_id: int) -> bool:
+        """Удалить голос из нативного опроса"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                DELETE FROM native_poll_votes
+                WHERE poll_id = ? AND user_id = ? AND answer_id = ?
+            ''', (poll_id, user_id, answer_id))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error removing native poll vote: {e}")
+            return False
+
+    def get_native_poll_by_message(self, message_id: int):
+        """Получить poll_id по message_id"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT poll_id FROM native_polls WHERE message_id = ?
+        ''', (message_id,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        return result[0] if result else None
+
+    def get_native_poll_votes(self, poll_id: str) -> list:
+        """Получить все голоса в опросе"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT user_id, answer_id, voted_at
+            FROM native_poll_votes
+            WHERE poll_id = ?
+            ORDER BY voted_at
+        ''', (poll_id,))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        return results
+
+    def export_native_poll_to_csv(self, poll_id: str, guild=None) -> str:
+        """Экспортировать нативный опрос в CSV с именами проголосовавших"""
+        poll_data = self.get_native_poll(poll_id)
+        if not poll_data:
+            return None
+
+        import json
+        output = StringIO()
+        writer = csv.writer(output)
+
+        # Шапка
+        writer.writerow(['Native Discord Poll Export'])
+        writer.writerow(['Poll ID:', poll_id])
+        writer.writerow(['Question:', poll_data['question']])
+        writer.writerow(['Status:', 'Finalized' if poll_data['is_finalized'] else 'Active'])
+        writer.writerow(['Duration:', f"{poll_data['duration_hours']} hours"])
+        writer.writerow([])
+
+        # Получаем все голоса
+        votes = self.get_native_poll_votes(poll_id)
+        
+        # Группируем по answer_id
+        votes_by_answer = {}
+        for user_id, answer_id, voted_at in votes:
+            if answer_id not in votes_by_answer:
+                votes_by_answer[answer_id] = []
+            votes_by_answer[answer_id].append(user_id)
+
+        total_votes = len(votes)
+        writer.writerow(['Total Votes:', total_votes])
+        writer.writerow([])
+
+        # Краткая статистика
+        writer.writerow(['Option', 'Votes', 'Percentage'])
+        options = poll_data['options']
+        for i, option in enumerate(options):
+            vote_count = len(votes_by_answer.get(i, []))
+            percentage = (vote_count / total_votes * 100) if total_votes > 0 else 0
+            writer.writerow([option, vote_count, f"{percentage:.1f}%"])
+
+        writer.writerow([])
+        writer.writerow([])
+
+        # Колоночный формат с именами
+        if guild:
+            # Заголовки
+            writer.writerow(options)
+
+            # Находим максимум голосов
+            max_votes = max([len(votes_by_answer.get(i, [])) for i in range(len(options))], default=0)
+
+            # Заполняем построчно
+            for row_idx in range(max_votes):
+                row = []
+                for answer_idx in range(len(options)):
+                    voters = votes_by_answer.get(answer_idx, [])
+                    
+                    if row_idx < len(voters):
+                        user_id = voters[row_idx]
+                        member = guild.get_member(user_id)
+                        username = member.display_name if member else f"Unknown (ID: {user_id})"
+                        row.append(username)
+                    else:
+                        row.append('')
+                
+                writer.writerow(row)
+
+        return output.getvalue()
+
+    def export_native_poll_to_csv_detailed(self, poll_id: str, guild=None, days: int = 7) -> str:
+        """Экспортировать нативный опрос с детальной статистикой активности"""
+        poll_data = self.get_native_poll(poll_id)
+        if not poll_data:
+            return None
+
+        output = StringIO()
+        writer = csv.writer(output)
+
+        # Шапка
+        writer.writerow(['Native Discord Poll Export (Detailed)'])
+        writer.writerow(['Poll ID:', poll_id])
+        writer.writerow(['Question:', poll_data['question']])
+        writer.writerow(['Status:', 'Finalized' if poll_data['is_finalized'] else 'Active'])
+        writer.writerow(['Period:', f'{days} days'])
+        writer.writerow([])
+
+        # Получаем все голоса
+        votes = self.get_native_poll_votes(poll_id)
+        
+        # Группируем по answer_id
+        votes_by_answer = {}
+        for user_id, answer_id, voted_at in votes:
+            if answer_id not in votes_by_answer:
+                votes_by_answer[answer_id] = []
+            votes_by_answer[answer_id].append(user_id)
+
+        total_votes = len(votes)
+        writer.writerow(['Total Votes:', total_votes])
+        writer.writerow([])
+
+        # Статистика
+        options = poll_data['options']
+        writer.writerow(['Option', 'Votes', 'Percentage'])
+        for i, option in enumerate(options):
+            vote_count = len(votes_by_answer.get(i, []))
+            percentage = (vote_count / total_votes * 100) if total_votes > 0 else 0
+            writer.writerow([option, vote_count, f"{percentage:.1f}%"])
+
+        writer.writerow([])
+        writer.writerow([])
+
+        # Детальный формат с активностью
+        if guild:
+            # Получаем статистику всех проголосовавших
+            all_voters = set()
+            for voters in votes_by_answer.values():
+                all_voters.update(voters)
+
+            user_stats_cache = {}
+            guild_id = poll_data['guild_id']
+            
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            for user_id in all_voters:
+                cursor.execute('''
+                    SELECT SUM(message_count) FROM user_messages_daily
+                    WHERE guild_id = ? AND user_id = ?
+                    AND message_date >= DATE('now', '-' || ? || ' days')
+                ''', (guild_id, user_id, days))
+                messages = cursor.fetchone()[0] or 0
+                
+                cursor.execute('''
+                    SELECT SUM(voice_time) FROM user_voice_daily
+                    WHERE guild_id = ? AND user_id = ?
+                    AND voice_date >= DATE('now', '-' || ? || ' days')
+                ''', (guild_id, user_id, days))
+                voice_time = cursor.fetchone()[0] or 0
+                
+                user_stats_cache[user_id] = {
+                    'messages': messages,
+                    'voice_time': voice_time
+                }
+            
+            conn.close()
+
+            # Сортируем по времени в войсе
+            sorted_votes_by_answer = {}
+            for answer_idx, voters in votes_by_answer.items():
+                sorted_voters = sorted(
+                    voters,
+                    key=lambda uid: user_stats_cache.get(uid, {}).get('voice_time', 0),
+                    reverse=True
+                )
+                sorted_votes_by_answer[answer_idx] = sorted_voters
+
+            # Заголовки
+            writer.writerow(options)
+
+            # Максимум голосов
+            max_votes = max([len(sorted_votes_by_answer.get(i, [])) for i in range(len(options))], default=0)
+
+            # Заполняем с статистикой
+            for row_idx in range(max_votes):
+                row = []
+                for answer_idx in range(len(options)):
+                    voters = sorted_votes_by_answer.get(answer_idx, [])
+                    
+                    if row_idx < len(voters):
+                        user_id = voters[row_idx]
+                        member = guild.get_member(user_id)
+                        username = member.display_name if member else f"Unknown (ID: {user_id})"
+                        
+                        stats = user_stats_cache.get(user_id, {'messages': 0, 'voice_time': 0})
+                        messages = stats['messages']
+                        hours = int(stats['voice_time'] // 3600)
+                        minutes = int((stats['voice_time'] % 3600) // 60)
+                        
+                        cell = f"{username} | {messages} msg | {hours}h {minutes}m"
+                        row.append(cell)
+                    else:
+                        row.append('')
+                
+                writer.writerow(row)
+
+        return output.getvalue()
+
+
+    def add_native_poll_vote(self, poll_id: str, user_id: int, answer_id: int) -> bool:
+        """Добавить голос в нативном опросе"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO native_poll_votes (poll_id, user_id, answer_id)
+                VALUES (?, ?, ?)
+            """, (poll_id, user_id, answer_id))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error adding native poll vote: {e}")
+            return False
+
+    def remove_native_poll_vote(self, poll_id: str, user_id: int, answer_id: int) -> bool:
+        """Удалить голос в нативном опросе"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                DELETE FROM native_poll_votes
+                WHERE poll_id = ? AND user_id = ? AND answer_id = ?
+            """, (poll_id, user_id, answer_id))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error removing native poll vote: {e}")
+            return False
+
+    def get_native_poll_votes(self, poll_id: str) -> list:
+        """Получить все голоса в нативном опросе"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT user_id, answer_id, voted_at
+            FROM native_poll_votes
+            WHERE poll_id = ?
+            ORDER BY voted_at
+        """, (poll_id,))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        return results
+
+    def get_native_poll_by_message(self, message_id: int) -> dict:
+        """Получить опрос по ID сообщения"""
+        import json
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT poll_id, guild_id, channel_id, message_id, question, options, 
+                   duration_hours, created_by, created_at, is_finalized
+            FROM native_polls
+            WHERE message_id = ?
+        """, (message_id,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        if not result:
+            return None
+        
+        return {
+            "poll_id": result[0],
+            "guild_id": result[1],
+            "channel_id": result[2],
+            "message_id": result[3],
+            "question": result[4],
+            "options": json.loads(result[5]),
+            "duration_hours": result[6],
+            "created_by": result[7],
+            "created_at": result[8],
+            "is_finalized": bool(result[9])
+        }
+
+
+    def init_polls_db(self):
+        """Инициализация отдельной БД для опросов"""
+        conn = sqlite3.connect(self.polls_db_path)
+        cursor = conn.cursor()
+        
+        # Таблица для отслеживания опросов
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS polls (
+                message_id INTEGER PRIMARY KEY,
+                guild_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL,
+                question TEXT NOT NULL,
+                discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Таблица для вариантов ответов опросов
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS poll_options (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id INTEGER NOT NULL,
+                answer_id INTEGER NOT NULL,
+                answer_text TEXT NOT NULL,
+                FOREIGN KEY (message_id) REFERENCES polls(message_id),
+                UNIQUE(message_id, answer_id)
+            )
+        ''')
+        
+        # Таблица голосов
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS poll_votes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                answer_id INTEGER NOT NULL,
+                voted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (message_id) REFERENCES polls(message_id),
+                UNIQUE(message_id, user_id, answer_id)
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        print("✅ Polls database initialized")
+
+    # ========== МЕТОДЫ ДЛЯ ОПРОСОВ (ОТДЕЛЬНАЯ БД) ==========
+
+    def register_poll(self, message_id: int, guild_id: int, channel_id: int, question: str, options: list = None) -> bool:
+        """Зарегистрировать опрос при первом голосе"""
+        try:
+            conn = sqlite3.connect(self.polls_db_path)
+            cursor = conn.cursor()
+            
+            # Сохраняем опрос
+            cursor.execute('''
+                INSERT OR IGNORE INTO polls (message_id, guild_id, channel_id, question)
+                VALUES (?, ?, ?, ?)
+            ''', (message_id, guild_id, channel_id, question))
+            
+            # Если переданы варианты ответов - сохраняем их
+            if options:
+                for answer_id, answer_text in enumerate(options):
+                    cursor.execute('''
+                        INSERT OR IGNORE INTO poll_options (message_id, answer_id, answer_text)
+                        VALUES (?, ?, ?)
+                    ''', (message_id, answer_id, answer_text))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error registering poll: {e}")
+            return False
+
+    def get_poll(self, message_id: int) -> dict:
+        """Получить информацию об опросе"""
+        conn = sqlite3.connect(self.polls_db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT message_id, guild_id, channel_id, question, discovered_at
+            FROM polls
+            WHERE message_id = ?
+        ''', (message_id,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        if not result:
+            return None
+        
+        return {
+            'message_id': result[0],
+            'guild_id': result[1],
+            'channel_id': result[2],
+            'question': result[3],
+            'discovered_at': result[4]
+        }
+
+    def add_poll_vote(self, message_id: int, user_id: int, answer_id: int) -> bool:
+        """Добавить голос в опросе"""
+        try:
+            conn = sqlite3.connect(self.polls_db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO poll_votes (message_id, user_id, answer_id)
+                VALUES (?, ?, ?)
+            ''', (message_id, user_id, answer_id))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error adding poll vote: {e}")
+            return False
+
+    def remove_poll_vote(self, message_id: int, user_id: int, answer_id: int) -> bool:
+        """Удалить голос из опроса"""
+        try:
+            conn = sqlite3.connect(self.polls_db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                DELETE FROM poll_votes
+                WHERE message_id = ? AND user_id = ? AND answer_id = ?
+            ''', (message_id, user_id, answer_id))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error removing poll vote: {e}")
+            return False
+
+    def get_poll_votes(self, message_id: int) -> list:
+        """Получить все голоса в опросе"""
+        conn = sqlite3.connect(self.polls_db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT user_id, answer_id, voted_at
+            FROM poll_votes
+            WHERE message_id = ?
+            ORDER BY voted_at
+        ''', (message_id,))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        return results
+
+    def get_all_polls(self, guild_id: int) -> list:
+        """Получить все опросы сервера"""
+        conn = sqlite3.connect(self.polls_db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT message_id, question, discovered_at
+            FROM polls
+            WHERE guild_id = ?
+            ORDER BY discovered_at DESC
+        ''', (guild_id,))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        return [
+            {
+                'message_id': r[0],
+                'question': r[1],
+                'discovered_at': r[2]
+            }
+            for r in results
+        ]
+
+    def get_poll_options(self, message_id: int) -> list:
+        """Получить варианты ответов опроса из БД"""
+        conn = sqlite3.connect(self.polls_db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT answer_id, answer_text
+            FROM poll_options
+            WHERE message_id = ?
+            ORDER BY answer_id
+        ''', (message_id,))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        return results
