@@ -66,7 +66,7 @@ class StatsSelectMenu(discord.ui.Select):
             )
 
         # Голосовые каналы
-        voice_time_period = sum([duration for _, duration in stats['voice_by_channel']])
+        voice_time_period = stats['period_voice_time']
         hours_period = int(voice_time_period // 3600)
         minutes_period = int((voice_time_period % 3600) // 60)
 
@@ -99,22 +99,6 @@ class StatsSelectMenu(discord.ui.Select):
                         value=f"**По сообщениям:** #{user_rank_messages}/{len(total_users_stats)}\n**По войсу:** #{user_rank_voice}/{len(total_users_stats)}",
                         inline=False
                     )
-
-        # Топ каналов
-        if stats['voice_by_channel']:
-            top_channels = []
-            for channel_id, duration in stats['voice_by_channel'][:3]:
-                channel = interaction.guild.get_channel(channel_id)
-                channel_name = channel.name if channel else f"ID:{channel_id}"
-                hours = int(duration // 3600)
-                minutes = int((duration % 3600) // 60)
-                top_channels.append(f"**{channel_name}:** {hours}ч {minutes}м")
-
-            embed.add_field(
-                name="🎯 Топ-3 голосовых канала",
-                value="\n".join(top_channels),
-                inline=False
-            )
 
         embed.set_footer(text=f"Запросил: {interaction.user.name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
 
@@ -203,22 +187,13 @@ class ExportModal(discord.ui.Modal, title="📤 Экспорт статисти�
             writer.writerow([])
 
             writer.writerow(['Voice Time'])
-            voice_time_period = sum([duration for _, duration in stats['voice_by_channel']])
+            voice_time_period = stats['period_voice_time']
             if days:
                 writer.writerow(['Period Voice Time (seconds):', int(voice_time_period)])
                 writer.writerow(['Period Voice Time (formatted):', f"{int(voice_time_period // 3600)}h {int((voice_time_period % 3600) // 60)}m"])
             writer.writerow(['Total Voice Time (seconds):', int(stats['total_voice_time'])])
             writer.writerow(['Total Voice Time (formatted):', f"{int(stats['total_voice_time'] // 3600)}h {int((stats['total_voice_time'] % 3600) // 60)}m"])
             writer.writerow([])
-
-            writer.writerow(['Voice Channels'])
-            writer.writerow(['Channel Name', 'Time (seconds)', 'Time (formatted)'])
-            for channel_id, duration in stats['voice_by_channel']:
-                channel = interaction.guild.get_channel(channel_id)
-                channel_name = channel.name if channel else f"ID:{channel_id}"
-                hours = int(duration // 3600)
-                minutes = int((duration % 3600) // 60)
-                writer.writerow([channel_name, int(duration), f"{hours}h {minutes}m"])
 
             csv_data = output.getvalue()
 
@@ -486,34 +461,6 @@ class StatsView(discord.ui.View):
             embed.add_field(
                 name="📊 Распределение активности",
                 value=f"🎤 Голосовая: `{'█' * voice_bar}{'░' * message_bar}` {voice_percent:.1f}%\n💬 Текстовая: `{'█' * message_bar}{'░' * voice_bar}` {message_percent:.1f}%",
-                inline=False
-            )
-        
-        # Топ-5 голосовых каналов
-        if stats['voice_by_channel']:
-            top_channels_text = []
-            for i, (channel_id, duration) in enumerate(stats['voice_by_channel'][:5], 1):
-                channel = interaction.guild.get_channel(channel_id)
-                channel_name = channel.name if channel else f"ID:{channel_id}"
-                hours = int(duration // 3600)
-                minutes = int((duration % 3600) // 60)
-                
-                # Визуальная полоса
-                max_duration = stats['voice_by_channel'][0][1] if stats['voice_by_channel'] else 1
-                bar_length = int((duration / max_duration) * 10)
-                bar = "█" * bar_length + "░" * (10 - bar_length)
-                
-                top_channels_text.append(f"{i}. **{channel_name}**\n`{bar}` {hours}ч {minutes}м")
-            
-            embed.add_field(
-                name="🎯 Топ-5 голосовых каналов",
-                value="\n".join(top_channels_text),
-                inline=False
-            )
-        else:
-            embed.add_field(
-                name="🎯 Топ-5 голосовых каналов",
-                value="Нет данных о голосовой активности",
                 inline=False
             )
         
@@ -925,73 +872,6 @@ class PanelView(discord.ui.View):
         embed.set_footer(text=f"Запросил: {interaction.user.name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
         
         await interaction.response.edit_message(embed=embed, view=WhitelistView(self.bot))
-    
-    @discord.ui.button(label="📊 Polls", style=discord.ButtonStyle.gray, custom_id="polls_panel", row=0)
-    async def polls(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Импортируем PollsMenuView из cogs.polls_extension
-        try:
-            import sys
-            import importlib
-            
-            if 'cogs.polls_extension' in sys.modules:
-                polls_module = sys.modules['cogs.polls_extension']
-                importlib.reload(polls_module)
-                PollsMenuView = polls_module.PollsMenuView
-            else:
-                from cogs.polls_extension import PollsMenuView
-        except ImportError:
-            try:
-                from polls_extension import PollsMenuView
-            except ImportError:
-                await interaction.response.send_message("❌ Модуль опросов не найден", ephemeral=True)
-                return
-        
-        embed = discord.Embed(
-            title="📊 Управление опросами",
-            description="Создавайте интерактивные опросы с полной статистикой",
-            color=0x9B59B6,
-            timestamp=datetime.utcnow()
-        )
-        
-        embed.add_field(
-            name="📝 Создать",
-            value="Создать новый опрос",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="📊 Результаты",
-            value="Посмотреть результаты",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="📊 Детально",
-            value="Детальные результаты",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="📋 Список",
-            value="Все опросы сервера",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="🔒 Закрыть",
-            value="Закрыть опрос",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="📤 Экспорт",
-            value="Скачать данные",
-            inline=True
-        )
-        
-        embed.set_footer(text=f"Запросил: {interaction.user.name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
-        
-        await interaction.response.edit_message(embed=embed, view=PollsMenuView(self.bot))
     
     @discord.ui.button(label="⚠️ Warnings", style=discord.ButtonStyle.red, custom_id="warnings_panel", row=1)  # ← НОВАЯ КНОПКА!
     async def warnings(self, interaction: discord.Interaction, button: discord.ui.Button):
