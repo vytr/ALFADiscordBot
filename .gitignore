@@ -38,4 +38,4 @@ wheels/
 Thumbs.db
 
 bot_database.db
-whitelist.db
+polls_database.db

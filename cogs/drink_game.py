@@ -158,7 +158,7 @@ class DrinkGame(commands.Cog):
         
         if last_drink:
             time_passed = datetime.utcnow() - last_drink
-            cooldown = timedelta(hours=1)  # ИСПРАВЛЕНО: 1 час для консистентности
+            cooldown = timedelta(hours=1)
             
             if time_passed < cooldown:
                 time_left = cooldown - time_passed
@@ -419,7 +419,7 @@ class DrinkGame(commands.Cog):
         last_drink = self.get_last_drink_time(ctx.guild.id, target.id)
         if last_drink and target == ctx.author:
             time_passed = datetime.utcnow() - last_drink
-            cooldown = timedelta(hours=1)  # ИСПРАВЛЕНО: было hours=8
+            cooldown = timedelta(hours=8)
             
             if time_passed < cooldown:
                 time_left = cooldown - time_passed
