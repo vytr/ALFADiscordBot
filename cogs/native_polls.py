@@ -281,7 +281,7 @@ class NativePollSystem(commands.Cog):
     @is_admin_or_whitelisted()
     async def poll_export(self, ctx, message_id_or_link: str):
         """
-        Экспорт опроса в CSV с именами.
+        Экспорт опроса в XLSX с форматированием.
         
         Формат: 
         !poll_export <message_id>
@@ -312,9 +312,31 @@ class NativePollSystem(commands.Cog):
             return
         
         try:
-            channel = self.bot.get_channel(poll_data['channel_id'])
-            message = await channel.fetch_message(msg_id)
-            poll = message.poll
+            # Получаем опрос
+            poll = None
+            poll_question = poll_data['question']
+            poll_answers = []
+            
+            try:
+                channel = self.bot.get_channel(poll_data['channel_id'])
+                if channel:
+                    message = await channel.fetch_message(msg_id)
+                    poll = message.poll
+                    if poll:
+                        poll_question = poll.question
+                        poll_answers = poll.answers
+            except:
+                pass
+            
+            # Если опрос недоступен - берем из БД
+            if not poll_answers:
+                poll_options = self.db.get_poll_options(msg_id)
+                if poll_options:
+                    class FakeAnswer:
+                        def __init__(self, answer_id, text):
+                            self.id = answer_id
+                            self.text = text
+                    poll_answers = [FakeAnswer(aid, text) for aid, text in poll_options]
             
             votes = self.db.get_poll_votes(msg_id)
             
@@ -324,66 +346,131 @@ class NativePollSystem(commands.Cog):
                     votes_by_answer[answer_id] = []
                 votes_by_answer[answer_id].append(user_id)
             
-            output = StringIO()
-            writer = csv.writer(output)
-            
-            writer.writerow(['Discord Poll Export'])
-            writer.writerow(['Message ID:', msg_id])
-            writer.writerow(['Question:', poll.question])
-            writer.writerow(['Status:', 'Finalized' if poll.is_finalized() else 'Active'])
-            writer.writerow([])
-            
-            total_votes = len(votes)
-            writer.writerow(['Total Votes:', total_votes])
-            writer.writerow([])
-            
-            writer.writerow(['Option', 'Votes', 'Percentage'])
-            for answer in poll.answers:
-                count = len(votes_by_answer.get(answer.id, []))
-                percentage = (count / total_votes * 100) if total_votes > 0 else 0
-                writer.writerow([answer.text, count, f"{percentage:.1f}%"])
-            
-            writer.writerow([])
-            writer.writerow([])
-            
-            # Колоночный формат
-            headers = [answer.text for answer in poll.answers]
-            writer.writerow(headers)
-            
-            max_votes = max([len(votes_by_answer.get(answer.id, [])) for answer in poll.answers], default=0)
-            
-            for row_index in range(max_votes):
-                row = []
-                for answer in poll.answers:
-                    voters = votes_by_answer.get(answer.id, [])
-                    
-                    if row_index < len(voters):
-                        user_id = voters[row_index]
-                        member = ctx.guild.get_member(user_id)
-                        username = member.display_name if member else f"ID:{user_id}"
-                        row.append(username)
-                    else:
-                        row.append('')
+            # Используем openpyxl для создания Excel с форматированием
+            try:
+                from openpyxl import Workbook
+                from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
                 
-                writer.writerow(row)
-            
-            csv_data = output.getvalue()
-            
-            file = discord.File(
-                io.BytesIO(csv_data.encode('utf-8-sig')),
-                filename=f'poll_{msg_id}.csv'
-            )
-            
-            await ctx.send(f"📊 Экспорт ({total_votes} голосов)", file=file)
+                wb = Workbook()
+                ws = wb.active
+                ws.title = "Poll Results"
+                
+                # Заголовок
+                ws['A1'] = 'Discord Poll Export'
+                ws['A1'].font = Font(bold=True, size=14)
+                
+                ws['A2'] = 'Message ID:'
+                ws['B2'] = msg_id
+                ws['A3'] = 'Question:'
+                ws['B3'] = poll_question
+                ws['A4'] = 'Status:'
+                ws['B4'] = 'Finalized' if poll and poll.is_finalized() else 'Active'
+                
+                total_votes = len(votes)
+                ws['A6'] = 'Total Votes:'
+                ws['B6'] = total_votes
+                
+                # Статистика
+                ws['A8'] = 'Option'
+                ws['B8'] = 'Votes'
+                ws['C8'] = 'Percentage'
+                ws['A8'].font = Font(bold=True)
+                ws['B8'].font = Font(bold=True)
+                ws['C8'].font = Font(bold=True)
+                
+                row = 9
+                for answer in poll_answers:
+                    count = len(votes_by_answer.get(answer.id, []))
+                    percentage = (count / total_votes * 100) if total_votes > 0 else 0
+                    ws[f'A{row}'] = answer.text
+                    ws[f'B{row}'] = count
+                    ws[f'C{row}'] = f"{percentage:.1f}%"
+                    row += 1
+                
+                # ПУСТАЯ СТРОКА для визуального разделения
+                row += 1
+                
+                # Заголовки вариантов (со смещением вправо - начинаем с колонки B)
+                start_col = 1  # Колонка B (0=A, 1=B)
+                header_row = row
+                
+                # Цвет для заголовков (желтый как на скрине)
+                yellow_fill = PatternFill(start_color='FFD966', end_color='FFD966', fill_type='solid')
+                thin_border = Border(
+                    left=Side(style='thin'),
+                    right=Side(style='thin'),
+                    top=Side(style='thin'),
+                    bottom=Side(style='thin')
+                )
+                
+                for i, answer in enumerate(poll_answers):
+                    col_letter = chr(ord('A') + start_col + i)
+                    cell = ws[f'{col_letter}{header_row}']
+                    
+                    cell.value = answer.text
+                    cell.fill = yellow_fill
+                    cell.font = Font(bold=True, size=11)
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                    cell.border = thin_border
+                    
+                    # Ширина колонки
+                    ws.column_dimensions[col_letter].width = 30
+                
+                # Заполняем данные (голоса пользователей)
+                max_votes = max([len(votes_by_answer.get(answer.id, [])) for answer in poll_answers], default=0)
+                
+                for row_index in range(max_votes):
+                    data_row = header_row + 1 + row_index
+                    
+                    for i, answer in enumerate(poll_answers):
+                        voters = votes_by_answer.get(answer.id, [])
+                        col_letter = chr(ord('A') + start_col + i)
+                        
+                        if row_index < len(voters):
+                            user_id = voters[row_index]
+                            member = ctx.guild.get_member(user_id)
+                            
+                            cell = ws[f'{col_letter}{data_row}']
+                            
+                            if member:
+                                # Создаем ссылку на профиль Discord
+                                username = member.display_name
+                                profile_link = f"https://discord.com/users/{user_id}"
+                                
+                                cell.value = username
+                                cell.hyperlink = profile_link
+                                cell.font = Font(color='0563C1', underline='single')  # Синий цвет ссылки
+                            else:
+                                cell.value = f"ID:{user_id}"
+                            
+                            cell.alignment = Alignment(vertical='center')
+                            cell.border = thin_border
+                
+                # Сохраняем в BytesIO
+                excel_file = io.BytesIO()
+                wb.save(excel_file)
+                excel_file.seek(0)
+                
+                file = discord.File(
+                    excel_file,
+                    filename=f'poll_{msg_id}.xlsx'
+                )
+                
+                await ctx.send(f"📊 Экспорт ({total_votes} голосов)", file=file)
+                
+            except ImportError:
+                await ctx.send("❌ Требуется установить openpyxl: `pip install openpyxl --break-system-packages`", delete_after=10)
             
         except Exception as e:
             await ctx.send(f"❌ Ошибка: {e}", delete_after=10)
+            import traceback
+            traceback.print_exc()
     
     @commands.command(name='poll_export_detail')
     @is_admin_or_whitelisted()
     async def poll_export_detail(self, ctx, message_id_or_link: str, days: int = 7):
         """
-        Экспорт с статистикой активности.
+        Экспорт с статистикой активности в XLSX.
         
         Формат: 
         !poll_export_detail <message_id> [7/14/30]
@@ -418,9 +505,31 @@ class NativePollSystem(commands.Cog):
             return
         
         try:
-            channel = self.bot.get_channel(poll_data['channel_id'])
-            message = await channel.fetch_message(msg_id)
-            poll = message.poll
+            # Получаем опрос
+            poll = None
+            poll_question = poll_data['question']
+            poll_answers = []
+            
+            try:
+                channel = self.bot.get_channel(poll_data['channel_id'])
+                if channel:
+                    message = await channel.fetch_message(msg_id)
+                    poll = message.poll
+                    if poll:
+                        poll_question = poll.question
+                        poll_answers = poll.answers
+            except:
+                pass
+            
+            # Если опрос недоступен - берем из БД
+            if not poll_answers:
+                poll_options = self.db.get_poll_options(msg_id)
+                if poll_options:
+                    class FakeAnswer:
+                        def __init__(self, answer_id, text):
+                            self.id = answer_id
+                            self.text = text
+                    poll_answers = [FakeAnswer(aid, text) for aid, text in poll_options]
             
             votes = self.db.get_poll_votes(msg_id)
             
@@ -454,66 +563,134 @@ class NativePollSystem(commands.Cog):
                 )
                 sorted_votes_by_answer[answer_id] = sorted_voters
             
-            output = StringIO()
-            writer = csv.writer(output)
-            
-            writer.writerow(['Discord Poll Export (Detailed)'])
-            writer.writerow(['Message ID:', msg_id])
-            writer.writerow(['Question:', poll.question])
-            writer.writerow(['Period:', f'{days} days'])
-            writer.writerow([])
-            
-            total_votes = len(votes)
-            writer.writerow(['Total Votes:', total_votes])
-            writer.writerow([])
-            
-            writer.writerow(['Option', 'Votes', 'Percentage'])
-            for answer in poll.answers:
-                count = len(votes_by_answer.get(answer.id, []))
-                percentage = (count / total_votes * 100) if total_votes > 0 else 0
-                writer.writerow([answer.text, count, f"{percentage:.1f}%"])
-            
-            writer.writerow([])
-            writer.writerow([])
-            
-            headers = [answer.text for answer in poll.answers]
-            writer.writerow(headers)
-            
-            max_votes = max([len(sorted_votes_by_answer.get(answer.id, [])) for answer in poll.answers], default=0)
-            
-            for row_index in range(max_votes):
-                row = []
-                for answer in poll.answers:
-                    voters = sorted_votes_by_answer.get(answer.id, [])
-                    
-                    if row_index < len(voters):
-                        user_id = voters[row_index]
-                        member = ctx.guild.get_member(user_id)
-                        username = member.display_name if member else f"ID:{user_id}"
-                        
-                        stats = user_stats.get(user_id, {'messages': 0, 'voice_time': 0})
-                        messages = stats['messages']
-                        voice_hours = int(stats['voice_time'] // 3600)
-                        voice_minutes = int((stats['voice_time'] % 3600) // 60)
-                        
-                        cell_value = f"{username} | {messages} msg | {voice_hours}h {voice_minutes}m"
-                        row.append(cell_value)
-                    else:
-                        row.append('')
+            # Создаем Excel с форматированием
+            try:
+                from openpyxl import Workbook
+                from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
                 
-                writer.writerow(row)
-            
-            csv_data = output.getvalue()
-            
-            file = discord.File(
-                io.BytesIO(csv_data.encode('utf-8-sig')),
-                filename=f'poll_{msg_id}_detailed_{days}d.csv'
-            )
-            
-            await ctx.send(f"📊 Детальный экспорт ({days}д)", file=file)
+                wb = Workbook()
+                ws = wb.active
+                ws.title = "Poll Results Detailed"
+                
+                # Заголовок
+                ws['A1'] = 'Discord Poll Export (Detailed)'
+                ws['A1'].font = Font(bold=True, size=14)
+                
+                ws['A2'] = 'Message ID:'
+                ws['B2'] = msg_id
+                ws['A3'] = 'Question:'
+                ws['B3'] = poll_question
+                ws['A4'] = 'Period:'
+                ws['B4'] = f'{days} days'
+                
+                total_votes = len(votes)
+                ws['A6'] = 'Total Votes:'
+                ws['B6'] = total_votes
+                
+                # Статистика
+                ws['A8'] = 'Option'
+                ws['B8'] = 'Votes'
+                ws['C8'] = 'Percentage'
+                ws['A8'].font = Font(bold=True)
+                ws['B8'].font = Font(bold=True)
+                ws['C8'].font = Font(bold=True)
+                
+                row = 9
+                for answer in poll_answers:
+                    count = len(votes_by_answer.get(answer.id, []))
+                    percentage = (count / total_votes * 100) if total_votes > 0 else 0
+                    ws[f'A{row}'] = answer.text
+                    ws[f'B{row}'] = count
+                    ws[f'C{row}'] = f"{percentage:.1f}%"
+                    row += 1
+                
+                # ПУСТАЯ СТРОКА
+                row += 1
+                
+                # Заголовки вариантов (смещение вправо)
+                start_col = 1  # Колонка B
+                header_row = row
+                
+                yellow_fill = PatternFill(start_color='FFD966', end_color='FFD966', fill_type='solid')
+                thin_border = Border(
+                    left=Side(style='thin'),
+                    right=Side(style='thin'),
+                    top=Side(style='thin'),
+                    bottom=Side(style='thin')
+                )
+                
+                for i, answer in enumerate(poll_answers):
+                    col_letter = chr(ord('A') + start_col + i)
+                    cell = ws[f'{col_letter}{header_row}']
+                    
+                    cell.value = answer.text
+                    cell.fill = yellow_fill
+                    cell.font = Font(bold=True, size=11)
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                    cell.border = thin_border
+                    
+                    ws.column_dimensions[col_letter].width = 35
+                
+                # Заполняем данные с статистикой
+                max_votes = max([len(sorted_votes_by_answer.get(answer.id, [])) for answer in poll_answers], default=0)
+                
+                for row_index in range(max_votes):
+                    data_row = header_row + 1 + row_index
+                    
+                    for i, answer in enumerate(poll_answers):
+                        voters = sorted_votes_by_answer.get(answer.id, [])
+                        col_letter = chr(ord('A') + start_col + i)
+                        
+                        if row_index < len(voters):
+                            user_id = voters[row_index]
+                            member = ctx.guild.get_member(user_id)
+                            
+                            cell = ws[f'{col_letter}{data_row}']
+                            
+                            if member:
+                                username = member.display_name
+                                profile_link = f"https://discord.com/users/{user_id}"
+                                
+                                stats = user_stats.get(user_id, {'messages': 0, 'voice_time': 0})
+                                messages = stats['messages']
+                                voice_hours = int(stats['voice_time'] // 3600)
+                                voice_minutes = int((stats['voice_time'] % 3600) // 60)
+                                
+                                cell_value = f"{username} | {messages} msg | {voice_hours}h {voice_minutes}m"
+                                
+                                cell.value = cell_value
+                                cell.hyperlink = profile_link
+                                cell.font = Font(color='0563C1', underline='single')
+                            else:
+                                stats = user_stats.get(user_id, {'messages': 0, 'voice_time': 0})
+                                messages = stats['messages']
+                                voice_hours = int(stats['voice_time'] // 3600)
+                                voice_minutes = int((stats['voice_time'] % 3600) // 60)
+                                
+                                cell.value = f"ID:{user_id} | {messages} msg | {voice_hours}h {voice_minutes}m"
+                            
+                            cell.alignment = Alignment(vertical='center')
+                            cell.border = thin_border
+                
+                # Сохраняем
+                excel_file = io.BytesIO()
+                wb.save(excel_file)
+                excel_file.seek(0)
+                
+                file = discord.File(
+                    excel_file,
+                    filename=f'poll_{msg_id}_detailed_{days}d.xlsx'
+                )
+                
+                await ctx.send(f"📊 Детальный экспорт ({days}д, {total_votes} голосов)", file=file)
+                
+            except ImportError:
+                await ctx.send("❌ Требуется установить openpyxl: `pip install openpyxl --break-system-packages`", delete_after=10)
             
         except Exception as e:
             await ctx.send(f"❌ Ошибка: {e}", delete_after=10)
+            import traceback
+            traceback.print_exc()
     
     @commands.command(name='poll_list')
     @is_admin_or_whitelisted()
