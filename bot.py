@@ -31,10 +31,9 @@ class DiscordBot(commands.Bot):
             'cogs.whitelist',
             'cogs.stats',
             'cogs.panel',
-            'cogs.polls_extension',
             'cogs.drink_game',
             'cogs.warnings',
-            'cogs.native_polls',  # ← НОВЫЙ COG для отслеживания опросов
+            'cogs.native_polls', 
         ]
         
         for cog in cogs_to_load:
