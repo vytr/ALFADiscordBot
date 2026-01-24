@@ -4,39 +4,7 @@ import asyncio
 import config
 from database import Database
 import traceback
-from flask import Flask, jsonify
-import threading
 from datetime import datetime
-
-# Глобальные переменные для статистики
-bot_start_time = datetime.now()
-command_count = 0
-
-# Flask приложение для API
-flask_app = Flask(__name__)
-
-@flask_app.route('/stats')
-def stats():
-    try:
-        uptime = str(datetime.now() - bot_start_time).split('.')[0]
-        
-        # Используем глобальную переменную bot_instance
-        stats_data = {
-            'status': 'online' if bot_instance and bot_instance.is_ready() else 'starting',
-            'uptime': uptime,
-            'servers': len(bot_instance.guilds) if bot_instance and bot_instance.is_ready() else 0,
-            'users': sum(guild.member_count for guild in bot_instance.guilds) if bot_instance and bot_instance.is_ready() else 0,
-            'latency': round(bot_instance.latency * 1000, 2) if bot_instance and bot_instance.is_ready() else 0,
-            'commands': command_count
-        }
-        
-        return jsonify(stats_data)
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-def run_flask():
-    flask_app.run(host='0.0.0.0', port=5555, debug=False, use_reloader=False)
-# ===== КОНЕЦ ДОБАВЛЕНИЯ =====
 
 class DiscordBot(commands.Bot):
     def __init__(self):
@@ -56,9 +24,14 @@ class DiscordBot(commands.Bot):
         # Инициализация базы данных (теперь с отдельной БД для опросов)
         self.db = Database()
 
+        # Для API статистики
+        self.start_time = datetime.now()
+        self.command_count = 0
+
     async def setup_hook(self):
         """Загрузка расширений (cogs) при запуске бота"""
         cogs_to_load = [
+            'cogs.api',  # API первым!
             'cogs.help',
             'cogs.basic',
             'cogs.whitelist',
@@ -81,10 +54,6 @@ class DiscordBot(commands.Bot):
         print("\n🎉 Все расширения загружены\n")
 
     async def on_ready(self):
-        global bot_start_time
-        if bot_start_time is None:
-            bot_start_time = datetime.now()
-
         """Вызывается когда бот успешно подключился к Discord"""
         print(f'🤖 Бот {self.user} успешно запущен!')
         print(f'📌 ID: {self.user.id}')
@@ -119,21 +88,17 @@ class DiscordBot(commands.Bot):
 
     async def on_command(self, ctx):
         """Отслеживание выполненных команд"""
-        global command_count
-        command_count += 1
+        self.command_count += 1
 
+# Глобальная переменная для доступа к боту из API
 bot_instance = None
 
 async def main():
     global bot_instance
     
     bot = DiscordBot()
-    bot_instance = bot  # Сохраняем в глобальную переменную
+    bot_instance = bot  # ← ВАЖНО! Для cogs/api.py
     
-    # Запускаем Flask в отдельном потоке
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-
     async with bot:
         await bot.start(config.DISCORD_TOKEN)
 
