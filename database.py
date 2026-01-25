@@ -678,29 +678,61 @@ class Database:
         }
 
     def get_all_users_stats(self, guild_id: int, days: int = None, role_id: int = None) -> list:
-        """Получить статистику всех пользователей"""
+        """Получить статистику всех пользователей - ИСПРАВЛЕНО: убраны дублирующие JOIN"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
         if days:
+            # ИСПРАВЛЕНИЕ: Получаем messages и voice ОТДЕЛЬНО, потом объединяем
+            # Это избегает дублирования строк при JOIN
+            
+            # 1. Получаем базовую статистику
             cursor.execute('''
-                SELECT 
-                    s.user_id,
-                    s.total_messages,
-                    s.total_voice_time,
-                    COALESCE(SUM(m.message_count), 0) as period_messages,
-                    COALESCE(SUM(v.voice_time), 0) as period_voice_time
-                FROM user_stats_total s
-                LEFT JOIN user_messages_daily m ON s.guild_id = m.guild_id 
-                    AND s.user_id = m.user_id 
-                    AND m.message_date >= DATE('now', '-' || ? || ' days')
-                LEFT JOIN user_voice_daily v ON s.guild_id = v.guild_id 
-                    AND s.user_id = v.user_id 
-                    AND v.voice_date >= DATE('now', '-' || ? || ' days')
-                WHERE s.guild_id = ?
-                GROUP BY s.user_id
-                ORDER BY period_voice_time DESC, period_messages DESC
-            ''', (days, days, guild_id))
+                SELECT user_id, total_messages, total_voice_time
+                FROM user_stats_total
+                WHERE guild_id = ?
+            ''', (guild_id,))
+            
+            base_stats = {row[0]: {'total_messages': row[1], 'total_voice_time': row[2]} 
+                         for row in cursor.fetchall()}
+            
+            # 2. Получаем сообщения за период
+            cursor.execute('''
+                SELECT user_id, SUM(message_count) as period_messages
+                FROM user_messages_daily
+                WHERE guild_id = ? AND message_date >= DATE('now', '-' || ? || ' days')
+                GROUP BY user_id
+            ''', (guild_id, days))
+            
+            period_messages = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            # 3. Получаем войс за период
+            cursor.execute('''
+                SELECT user_id, SUM(voice_time) as period_voice_time
+                FROM user_voice_daily
+                WHERE guild_id = ? AND voice_date >= DATE('now', '-' || ? || ' days')
+                GROUP BY user_id
+            ''', (guild_id, days))
+            
+            period_voice = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            # 4. Объединяем всё
+            results = []
+            for user_id, stats in base_stats.items():
+                results.append({
+                    'user_id': user_id,
+                    'total_messages': stats['total_messages'],
+                    'total_voice_time': stats['total_voice_time'],
+                    'period_messages': period_messages.get(user_id, 0),
+                    'period_voice_time': period_voice.get(user_id, 0)
+                })
+            
+            # Сортируем
+            results.sort(key=lambda x: (x['period_voice_time'], x['period_messages']), reverse=True)
+            
+            conn.close()
+            return results
+            
         else:
             cursor.execute('''
                 SELECT user_id, total_messages, total_voice_time,
@@ -711,19 +743,19 @@ class Database:
                 ORDER BY total_voice_time DESC, total_messages DESC
             ''', (guild_id,))
 
-        results = cursor.fetchall()
-        conn.close()
+            results = cursor.fetchall()
+            conn.close()
 
-        return [
-            {
-                'user_id': r[0],
-                'total_messages': r[1],
-                'total_voice_time': r[2],
-                'period_messages': r[3],
-                'period_voice_time': r[4]
-            }
-            for r in results
-        ]
+            return [
+                {
+                    'user_id': r[0],
+                    'total_messages': r[1],
+                    'total_voice_time': r[2],
+                    'period_messages': r[3],
+                    'period_voice_time': r[4]
+                }
+                for r in results
+            ]
 
     def get_inactive_users(self, guild_id: int, days: int) -> list:
         """Получить список неактивных пользователей"""
