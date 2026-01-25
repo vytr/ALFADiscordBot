@@ -112,6 +112,18 @@ class Database:
             )
         ''')
 
+        # Таблица статистики напитков
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS drink_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                drink_type TEXT NOT NULL,
+                amount INTEGER NOT NULL,
+                drunk_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         # Старые таблицы опросов (оставляем для совместимости, но не используем)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS polls (
@@ -331,8 +343,61 @@ class Database:
             print(f"❌ Error starting voice session: {e}")
             return None
 
+    def _distribute_voice_time_across_dates(self, cursor, guild_id: int, user_id: int, 
+                                           join_time_str: str, leave_time_str: str, total_duration: int):
+        """
+        ИСПРАВЛЕНИЕ БАГА: Распределяет время голосовой сессии по датам.
+        
+        Если сессия пересекает полночь, время правильно распределяется между датами.
+        Например: 23:00-02:00 (3 часа) → 17 января: 1 час, 18 января: 2 часа
+        """
+        try:
+            # Парсим timestamps
+            join_time = datetime.strptime(join_time_str, '%Y-%m-%d %H:%M:%S')
+            leave_time = datetime.strptime(leave_time_str, '%Y-%m-%d %H:%M:%S')
+            
+            current_date = join_time.date()
+            end_date = leave_time.date()
+            
+            remaining_duration = total_duration
+            
+            while current_date <= end_date:
+                # Определяем границы текущего дня
+                day_start = datetime.combine(current_date, datetime.min.time())
+                day_end = datetime.combine(current_date, datetime.max.time())
+                
+                # Определяем фактическое начало и конец для этого дня
+                actual_start = max(join_time, day_start)
+                actual_end = min(leave_time, day_end)
+                
+                # Вычисляем длительность для этого дня
+                day_duration = int((actual_end - actual_start).total_seconds())
+                
+                if day_duration > 0:
+                    # Записываем время для текущей даты
+                    cursor.execute('''
+                        INSERT INTO user_voice_daily (guild_id, user_id, voice_date, voice_time)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(guild_id, user_id, voice_date) DO UPDATE SET
+                        voice_time = voice_time + ?
+                    ''', (guild_id, user_id, current_date.isoformat(), day_duration, day_duration))
+                    
+                    remaining_duration -= day_duration
+                    print(f"📅 Distributed {day_duration}s to date {current_date}")
+                
+                # Переходим к следующему дню
+                current_date += timedelta(days=1)
+            
+            # Проверка: всё время должно быть распределено
+            if remaining_duration > 1:  # допуск 1 секунда на округления
+                print(f"⚠️ Warning: {remaining_duration}s not distributed!")
+                
+        except Exception as e:
+            print(f"❌ Error distributing voice time: {e}")
+            raise
+
     def end_voice_session(self, guild_id: int, user_id: int):
-        """Закончить голосовую сессию"""
+        """Закончить голосовую сессию - ИСПРАВЛЕНО"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -358,8 +423,9 @@ class Database:
                 WHERE id = ?
             ''', (session_id,))
 
-            cursor.execute('SELECT duration FROM user_voice_sessions WHERE id = ?', (session_id,))
-            duration = cursor.fetchone()[0]
+            cursor.execute('SELECT duration, leave_time FROM user_voice_sessions WHERE id = ?', (session_id,))
+            result = cursor.fetchone()
+            duration, leave_time = result
 
             if duration is None or duration < 0:
                 print(f"⚠️ Invalid duration calculated for session {session_id}")
@@ -367,7 +433,7 @@ class Database:
                 conn.close()
                 return False
 
-            # Обновляем статистику
+            # Обновляем общую статистику
             cursor.execute('''
                 INSERT INTO user_stats_total (guild_id, user_id, total_voice_time)
                 VALUES (?, ?, ?)
@@ -375,12 +441,10 @@ class Database:
                 total_voice_time = total_voice_time + ?
             ''', (guild_id, user_id, int(duration), int(duration)))
 
-            cursor.execute('''
-                INSERT INTO user_voice_daily (guild_id, user_id, voice_date, voice_time)
-                VALUES (?, ?, DATE('now'), ?)
-                ON CONFLICT(guild_id, user_id, voice_date) DO UPDATE SET
-                voice_time = voice_time + ?
-            ''', (guild_id, user_id, int(duration), int(duration)))
+            # ИСПРАВЛЕНИЕ: Распределяем время по датам
+            self._distribute_voice_time_across_dates(
+                cursor, guild_id, user_id, join_time, leave_time, int(duration)
+            )
 
             conn.commit()
             conn.close()
@@ -414,12 +478,17 @@ class Database:
             for session_id, guild_id, user_id, join_time in hanging_sessions:
                 max_duration_seconds = max_duration_hours * 3600
                 
+                # Вычисляем leave_time
+                leave_time_str = cursor.execute('''
+                    SELECT datetime(?, '+' || ? || ' hours')
+                ''', (join_time, max_duration_hours)).fetchone()[0]
+                
                 cursor.execute('''
                     UPDATE user_voice_sessions
-                    SET leave_time = datetime(join_time, '+' || ? || ' hours'),
+                    SET leave_time = ?,
                         duration = ?
                     WHERE id = ?
-                ''', (max_duration_hours, max_duration_seconds, session_id))
+                ''', (leave_time_str, max_duration_seconds, session_id))
 
                 cursor.execute('''
                     INSERT INTO user_stats_total (guild_id, user_id, total_voice_time)
@@ -427,6 +496,11 @@ class Database:
                     ON CONFLICT(guild_id, user_id) DO UPDATE SET
                     total_voice_time = total_voice_time + ?
                 ''', (guild_id, user_id, max_duration_seconds, max_duration_seconds))
+
+                # ИСПРАВЛЕНИЕ: Распределяем время по датам
+                self._distribute_voice_time_across_dates(
+                    cursor, guild_id, user_id, join_time, leave_time_str, max_duration_seconds
+                )
 
                 closed_count += 1
                 print(f"🔧 Closed hanging session {session_id} for user {user_id}")
@@ -466,8 +540,9 @@ class Database:
                     WHERE id = ?
                 ''', (session_id,))
 
-                cursor.execute('SELECT duration FROM user_voice_sessions WHERE id = ?', (session_id,))
-                duration = cursor.fetchone()[0]
+                cursor.execute('SELECT duration, leave_time FROM user_voice_sessions WHERE id = ?', (session_id,))
+                result = cursor.fetchone()
+                duration, leave_time = result
 
                 if duration and duration > 0:
                     cursor.execute('''
@@ -476,6 +551,11 @@ class Database:
                         ON CONFLICT(guild_id, user_id) DO UPDATE SET
                         total_voice_time = total_voice_time + ?
                     ''', (g_id, user_id, int(duration), int(duration)))
+                    
+                    # ИСПРАВЛЕНИЕ: Распределяем время по датам
+                    self._distribute_voice_time_across_dates(
+                        cursor, g_id, user_id, join_time, leave_time, int(duration)
+                    )
 
                 closed_count += 1
                 print(f"🔧 Force closed session {session_id} for user {user_id}")
@@ -499,8 +579,7 @@ class Database:
                     SELECT id, guild_id, user_id, join_time,
                            (julianday(CURRENT_TIMESTAMP) - julianday(join_time)) * 86400 as current_duration
                     FROM user_voice_sessions
-                    WHERE guild_id = ?
-                    AND leave_time IS NULL
+                    WHERE guild_id = ? AND leave_time IS NULL
                     ORDER BY join_time DESC
                 ''', (guild_id,))
             else:
@@ -635,37 +714,212 @@ class Database:
         results = cursor.fetchall()
         conn.close()
 
-        return [{
-            'user_id': r[0],
-            'total_messages': r[1],
-            'total_voice_time': r[2],
-            'period_messages': r[3],
-            'period_voice_time': r[4]
-        } for r in results]
+        return [
+            {
+                'user_id': r[0],
+                'total_messages': r[1],
+                'total_voice_time': r[2],
+                'period_messages': r[3],
+                'period_voice_time': r[4]
+            }
+            for r in results
+        ]
+
+    def get_inactive_users(self, guild_id: int, days: int) -> list:
+        """Получить список неактивных пользователей"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT DISTINCT user_id FROM user_stats_total
+            WHERE guild_id = ?
+        ''', (guild_id,))
+        
+        all_users = {row[0] for row in cursor.fetchall()}
+
+        cursor.execute('''
+            SELECT DISTINCT user_id FROM user_messages_daily
+            WHERE guild_id = ? AND message_date >= DATE('now', '-' || ? || ' days')
+            UNION
+            SELECT DISTINCT user_id FROM user_voice_daily
+            WHERE guild_id = ? AND voice_date >= DATE('now', '-' || ? || ' days')
+        ''', (guild_id, days, guild_id, days))
+
+        active_users = {row[0] for row in cursor.fetchall()}
+        conn.close()
+
+        inactive_user_ids = list(all_users - active_users)
+        return inactive_user_ids
+
+    # ========================================
+    # МЕТОДЫ ДЛЯ ВЫГОВОРОВ
+    # ========================================
+
+    def add_warning(self, guild_id: int, user_id: int, reason: str, warned_by: int, expires_at: datetime) -> int:
+        """Добавить выговор"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                INSERT INTO warnings (guild_id, user_id, reason, warned_by, expires_at)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (guild_id, user_id, reason, warned_by, expires_at.strftime('%Y-%m-%d %H:%M:%S')))
+
+            warning_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            return warning_id
+        except Exception as e:
+            print(f"Error adding warning: {e}")
+            return 0
+
+    def remove_warning(self, warning_id: int, removed_by: int, reason: str = None) -> bool:
+        """Снять выговор"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                UPDATE warnings
+                SET is_active = 0,
+                    removed_at = CURRENT_TIMESTAMP,
+                    removed_by = ?,
+                    removal_reason = ?
+                WHERE id = ? AND is_active = 1
+            ''', (removed_by, reason, warning_id))
+
+            success = cursor.rowcount > 0
+            conn.commit()
+            conn.close()
+            return success
+        except Exception as e:
+            print(f"Error removing warning: {e}")
+            return False
+
+    def get_user_warnings(self, guild_id: int, user_id: int) -> list:
+        """Получить все выговоры пользователя"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT id, reason, warned_by, warned_at, expires_at, is_active, removed_at, removed_by, removal_reason
+            FROM warnings
+            WHERE guild_id = ? AND user_id = ?
+            ORDER BY warned_at DESC
+        ''', (guild_id, user_id))
+
+        results = cursor.fetchall()
+        conn.close()
+        return results
+
+    def expire_warnings(self) -> int:
+        """Автоматически снять истёкшие выговоры"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                UPDATE warnings
+                SET is_active = 0
+                WHERE is_active = 1 AND expires_at <= CURRENT_TIMESTAMP
+            ''')
+
+            expired_count = cursor.rowcount
+            conn.commit()
+            conn.close()
+            return expired_count
+        except Exception as e:
+            print(f"Error expiring warnings: {e}")
+            return 0
+
+    def get_all_active_warnings(self, guild_id: int) -> list:
+        """Получить все активные выговоры на сервере"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT user_id, COUNT(*) as warning_count
+            FROM warnings
+            WHERE guild_id = ? AND is_active = 1
+            AND expires_at > CURRENT_TIMESTAMP
+            GROUP BY user_id
+            ORDER BY warning_count DESC
+        ''', (guild_id,))
+
+        results = cursor.fetchall()
+        conn.close()
+        return results
+
+    # ========================================
+    # МЕТОДЫ ДЛЯ НАПИТКОВ
+    # ========================================
+
+    def log_drink(self, guild_id: int, user_id: int, drink_type: str, amount: int) -> bool:
+        """Залогировать выпитый напиток"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                INSERT INTO drink_stats (guild_id, user_id, drink_type, amount)
+                VALUES (?, ?, ?, ?)
+            ''', (guild_id, user_id, drink_type, amount))
+
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error logging drink: {e}")
+            return False
+
+    def get_user_drinks(self, guild_id: int, user_id: int, days: int = None) -> dict:
+        """Получить статистику напитков пользователя"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        if days:
+            cursor.execute('''
+                SELECT drink_type, SUM(amount) as total
+                FROM drink_stats
+                WHERE guild_id = ? AND user_id = ?
+                AND drunk_at >= datetime('now', '-' || ? || ' days')
+                GROUP BY drink_type
+            ''', (guild_id, user_id, days))
+        else:
+            cursor.execute('''
+                SELECT drink_type, SUM(amount) as total
+                FROM drink_stats
+                WHERE guild_id = ? AND user_id = ?
+                GROUP BY drink_type
+            ''', (guild_id, user_id))
+
+        results = cursor.fetchall()
+        conn.close()
+
+        return {drink_type: total for drink_type, total in results}
 
     # ========================================
     # МЕТОДЫ ДЛЯ НАТИВНЫХ ОПРОСОВ DISCORD
     # ========================================
 
-    def register_poll(self, message_id: int, guild_id: int, channel_id: int, question: str, options: list = None) -> bool:
-        """Зарегистрировать опрос при первом голосе"""
+    def register_poll(self, message_id: int, guild_id: int, channel_id: int, 
+                     question: str, answers: list) -> bool:
+        """Зарегистрировать нативный опрос Discord"""
         try:
             conn = sqlite3.connect(self.polls_db_path)
             cursor = conn.cursor()
             
-            # Сохраняем опрос
             cursor.execute('''
-                INSERT OR IGNORE INTO polls (message_id, guild_id, channel_id, question)
+                INSERT OR REPLACE INTO polls (message_id, guild_id, channel_id, question)
                 VALUES (?, ?, ?, ?)
             ''', (message_id, guild_id, channel_id, question))
             
-            # Если переданы варианты ответов - сохраняем их
-            if options:
-                for answer_id, answer_text in enumerate(options):
-                    cursor.execute('''
-                        INSERT OR IGNORE INTO poll_options (message_id, answer_id, answer_text)
-                        VALUES (?, ?, ?)
-                    ''', (message_id, answer_id, answer_text))
+            for answer_id, answer_text in enumerate(answers):
+                cursor.execute('''
+                    INSERT OR REPLACE INTO poll_options (message_id, answer_id, answer_text)
+                    VALUES (?, ?, ?)
+                ''', (message_id, answer_id, answer_text))
             
             conn.commit()
             conn.close()
@@ -791,120 +1045,4 @@ class Database:
         results = cursor.fetchall()
         conn.close()
         
-        return results
-
-    # ========================================
-    # МЕТОДЫ ДЛЯ ВЫГОВОРОВ
-    # ========================================
-
-    def add_warning(self, guild_id: int, user_id: int, reason: str, warned_by: int, expires_at: datetime) -> int:
-        """Добавить выговор"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute('''
-                INSERT INTO warnings (guild_id, user_id, reason, warned_by, expires_at)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (guild_id, user_id, reason, warned_by, expires_at))
-
-            warning_id = cursor.lastrowid
-            conn.commit()
-            conn.close()
-            return warning_id
-        except Exception as e:
-            print(f"Error adding warning: {e}")
-            return None
-
-    def remove_warning(self, warning_id: int, removed_by: int, removal_reason: str = None) -> bool:
-        """Снять выговор"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute('''
-                UPDATE warnings
-                SET is_active = 0,
-                    removed_at = CURRENT_TIMESTAMP,
-                    removed_by = ?,
-                    removal_reason = ?
-                WHERE id = ?
-            ''', (removed_by, removal_reason, warning_id))
-
-            conn.commit()
-            conn.close()
-            return True
-        except Exception as e:
-            print(f"Error removing warning: {e}")
-            return False
-
-    def get_active_warnings(self, guild_id: int, user_id: int) -> list:
-        """Получить активные выговоры пользователя"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        cursor.execute('''
-            SELECT id, reason, warned_by, warned_at, expires_at
-            FROM warnings
-            WHERE guild_id = ? AND user_id = ? AND is_active = 1
-            AND expires_at > CURRENT_TIMESTAMP
-            ORDER BY warned_at DESC
-        ''', (guild_id, user_id))
-
-        results = cursor.fetchall()
-        conn.close()
-        return results
-
-    def get_warning_history(self, guild_id: int, user_id: int) -> list:
-        """Получить историю выговоров"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        cursor.execute('''
-            SELECT id, reason, warned_by, warned_at, expires_at, is_active, removed_at, removed_by, removal_reason
-            FROM warnings
-            WHERE guild_id = ? AND user_id = ?
-            ORDER BY warned_at DESC
-        ''', (guild_id, user_id))
-
-        results = cursor.fetchall()
-        conn.close()
-        return results
-
-    def expire_warnings(self) -> int:
-        """Автоматически снять истёкшие выговоры"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute('''
-                UPDATE warnings
-                SET is_active = 0
-                WHERE is_active = 1 AND expires_at <= CURRENT_TIMESTAMP
-            ''')
-
-            expired_count = cursor.rowcount
-            conn.commit()
-            conn.close()
-            return expired_count
-        except Exception as e:
-            print(f"Error expiring warnings: {e}")
-            return 0
-
-    def get_all_active_warnings(self, guild_id: int) -> list:
-        """Получить все активные выговоры на сервере"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        cursor.execute('''
-            SELECT user_id, COUNT(*) as warning_count
-            FROM warnings
-            WHERE guild_id = ? AND is_active = 1
-            AND expires_at > CURRENT_TIMESTAMP
-            GROUP BY user_id
-            ORDER BY warning_count DESC
-        ''', (guild_id,))
-
-        results = cursor.fetchall()
-        conn.close()
         return results
