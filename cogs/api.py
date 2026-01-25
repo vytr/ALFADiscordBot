@@ -52,6 +52,32 @@ class APIServer(commands.Cog):
             ]
             return jsonify(guilds)
         
+        @self.flask_app.route('/api/guild/<int:guild_id>/roles')
+        def get_guild_roles(guild_id):
+            if not self.bot.is_ready():
+                return jsonify({'error': 'Bot not ready'}), 503
+            
+            guild = self.bot.get_guild(guild_id)
+            if not guild:
+                return jsonify({'error': 'Guild not found'}), 404
+            
+            # Получаем все роли кроме @everyone
+            roles = [
+                {
+                    'id': r.id,
+                    'name': r.name,
+                    'color': str(r.color),
+                    'position': r.position
+                }
+                for r in guild.roles
+                if r.name != "@everyone"
+            ]
+            
+            # Сортируем по позиции (важные роли выше)
+            roles.sort(key=lambda x: x['position'], reverse=True)
+            
+            return jsonify(roles)
+        
         @self.flask_app.route('/api/guild/<int:guild_id>/members')
         def get_guild_members(guild_id):
             if not self.bot.is_ready():
@@ -67,7 +93,8 @@ class APIServer(commands.Cog):
                     'name': m.name,
                     'display_name': m.display_name,
                     'avatar': str(m.avatar.url) if m.avatar else None,
-                    'bot': m.bot
+                    'bot': m.bot,
+                    'roles': [r.id for r in m.roles if r.name != "@everyone"]
                 }
                 for m in guild.members
             ]
@@ -169,54 +196,6 @@ class APIServer(commands.Cog):
                 })
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
-            
-        @self.flask_app.route('/api/guild/<int:guild_id>/roles')
-        def get_guild_roles(guild_id):
-            if not self.bot.is_ready():
-                return jsonify({'error': 'Bot not ready'}), 503
-            
-            guild = self.bot.get_guild(guild_id)
-            if not guild:
-                return jsonify({'error': 'Guild not found'}), 404
-            
-            # Получаем все роли кроме @everyone
-            roles = [
-                {
-                    'id': r.id,
-                    'name': r.name,
-                    'color': str(r.color),
-                    'position': r.position
-                }
-                for r in guild.roles
-                if r.name != "@everyone"
-            ]
-            
-            # Сортируем по позиции (важные роли выше)
-            roles.sort(key=lambda x: x['position'], reverse=True)
-            
-            return jsonify(roles)
-
-        @self.flask_app.route('/api/guild/<int:guild_id>/members')
-        def get_guild_members(guild_id):
-            if not self.bot.is_ready():
-                return jsonify({'error': 'Bot not ready'}), 503
-            
-            guild = self.bot.get_guild(guild_id)
-            if not guild:
-                return jsonify({'error': 'Guild not found'}), 404
-            
-            members = [
-                {
-                    'id': m.id,
-                    'name': m.name,
-                    'display_name': m.display_name,
-                    'avatar': str(m.avatar.url) if m.avatar else None,
-                    'bot': m.bot,
-                    'roles': [r.id for r in m.roles if r.name != "@everyone"]  # ← ДОБАВИЛИ РОЛИ
-                }
-                for m in guild.members
-            ]
-            return jsonify(members)
     
     def run_flask(self):
         """Запуск Flask сервера"""
