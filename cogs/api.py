@@ -196,6 +196,61 @@ class APIServer(commands.Cog):
                 })
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
+            
+        @self.flask_app.route('/api/guild/<int:guild_id>/inactive/<int:days>/<activity_type>')
+        def get_inactive_users(guild_id, days, activity_type):
+            if not self.bot.is_ready():
+                return jsonify({'error': 'Bot not ready'}), 503
+            
+            if days not in [7, 14, 30]:
+                return jsonify({'error': 'Invalid days parameter'}), 400
+            
+            if activity_type not in ['messages', 'voice', 'both']:
+                return jsonify({'error': 'Invalid activity_type. Use: messages, voice, or both'}), 400
+            
+            try:
+                guild = self.bot.get_guild(guild_id)
+                if not guild:
+                    return jsonify({'error': 'Guild not found'}), 404
+                
+                # Все пользователи сервера (не боты)
+                all_members = [m.id for m in guild.members if not m.bot]
+                
+                # Получаем статистику
+                all_stats = self.bot.db.get_all_users_stats(guild_id, days)
+                
+                # Определяем активных по типу активности
+                active_user_ids = set()
+                
+                for stat in all_stats:
+                    if activity_type == 'messages':
+                        # Активен если есть сообщения
+                        if stat['period_messages'] > 0:
+                            active_user_ids.add(stat['user_id'])
+                    
+                    elif activity_type == 'voice':
+                        # Активен если есть время в войсе
+                        if stat['period_voice_time'] > 0:
+                            active_user_ids.add(stat['user_id'])
+                    
+                    elif activity_type == 'both':
+                        # Активен если есть И сообщения И войс
+                        if stat['period_messages'] > 0 and stat['period_voice_time'] > 0:
+                            active_user_ids.add(stat['user_id'])
+                
+                # Неактивные = все - активные
+                inactive_ids = [uid for uid in all_members if uid not in active_user_ids]
+                
+                return jsonify({
+                    'total_members': len(all_members),
+                    'active_members': len(active_user_ids),
+                    'inactive_members': len(inactive_ids),
+                    'inactive_user_ids': inactive_ids,
+                    'activity_type': activity_type
+                })
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+        
     
     def run_flask(self):
         """Запуск Flask сервера"""

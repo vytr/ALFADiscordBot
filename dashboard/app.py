@@ -35,9 +35,9 @@ def get_guild_stats(guild_id, days):
         return []
 
 @st.cache_data(ttl=60)
-def get_inactive_users(guild_id, days):
+def get_inactive_users(guild_id, days, activity_type='both'):
     try:
-        response = requests.get(f"{BOT_API_URL}/guild/{guild_id}/inactive/{days}", timeout=5)
+        response = requests.get(f"{BOT_API_URL}/guild/{guild_id}/inactive/{days}/{activity_type}", timeout=5)
         return response.json()
     except:
         return {'inactive_user_ids': [], 'total_members': 0, 'active_members': 0, 'inactive_members': 0}
@@ -165,8 +165,8 @@ with tab2:
     roles = get_guild_roles(guild_id)
     
     # Фильтры
-    col1, col2, col3 = st.columns(3)
-    
+    col1, col2 = st.columns([1, 1])
+
     with col1:
         inactive_days = st.selectbox(
             "📅 Период неактивности (дней)", 
@@ -174,8 +174,22 @@ with tab2:
             index=0, 
             key="inactive_days"
         )
-    
+
     with col2:
+        activity_type = st.selectbox(
+            "📊 Тип активности:",
+            options=['both', 'messages', 'voice'],
+            format_func=lambda x: {
+                'both': '💬🎤 Чат И Войс (оба)',
+                'messages': '💬 Только чат',
+                'voice': '🎤 Только войс'
+            }[x],
+            key="activity_type"
+        )
+
+    col3, col4 = st.columns(2)
+
+    with col3:
         # Фильтр: ВКЛЮЧИТЬ только с этими ролями
         include_roles = st.multiselect(
             "✅ Показать только с ролями:",
@@ -183,8 +197,8 @@ with tab2:
             format_func=lambda x: x['name'],
             key="include_roles"
         )
-    
-    with col3:
+
+    with col4:
         # Фильтр: ИСКЛЮЧИТЬ пользователей с этими ролями
         exclude_roles = st.multiselect(
             "❌ Исключить пользователей с ролями:",
@@ -192,9 +206,9 @@ with tab2:
             format_func=lambda x: x['name'],
             key="exclude_roles"
         )
-    
-    # Получаем данные
-    inactive_data = get_inactive_users(guild_id, inactive_days)
+
+    # Получаем данные с новым параметром
+    inactive_data = get_inactive_users(guild_id, inactive_days, activity_type)
     inactive_ids = inactive_data.get('inactive_user_ids', [])
     
     # Применяем фильтры по ролям
