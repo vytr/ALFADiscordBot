@@ -61,7 +61,6 @@ class APIServer(commands.Cog):
             if not guild:
                 return jsonify({'error': 'Guild not found'}), 404
             
-            # Получаем все роли кроме @everyone
             roles = [
                 {
                     'id': r.id,
@@ -73,7 +72,6 @@ class APIServer(commands.Cog):
                 if r.name != "@everyone"
             ]
             
-            # Сортируем по позиции (важные роли выше)
             roles.sort(key=lambda x: x['position'], reverse=True)
             
             return jsonify(roles)
@@ -98,6 +96,7 @@ class APIServer(commands.Cog):
                 }
                 for m in guild.members
             ]
+            
             return jsonify(members)
         
         @self.flask_app.route('/api/guild/<int:guild_id>/stats/<int:days>')
@@ -175,14 +174,14 @@ class APIServer(commands.Cog):
             
             try:
                 import sqlite3
+                
                 conn = sqlite3.connect(self.bot.db.db_path)
                 cursor = conn.cursor()
                 
-                # Общая статистика
                 cursor.execute('''
                     SELECT 
-                        COUNT(*) as total,
-                        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active,
+                        COUNT(*) as total_warnings,
+                        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_warnings,
                         COUNT(DISTINCT user_id) as unique_users
                     FROM warnings
                     WHERE guild_id = ?
@@ -190,7 +189,6 @@ class APIServer(commands.Cog):
                 
                 stats = cursor.fetchone()
                 
-                # Топ нарушителей
                 cursor.execute('''
                     SELECT user_id, COUNT(*) as warning_count
                     FROM warnings
@@ -212,6 +210,52 @@ class APIServer(commands.Cog):
                     'active_warnings': stats[1],
                     'unique_users': stats[2],
                     'top_offenders': top_offenders
+                })
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+        
+        # ==================== НОВЫЕ ЭНДПОИНТЫ ДЛЯ АВТОРИЗАЦИИ ====================
+        
+        @self.flask_app.route('/api/whitelist/check/<int:guild_id>/<int:user_id>')
+        def check_whitelist(guild_id, user_id):
+            """Проверка whitelist для пользователя"""
+            try:
+                from database import Database
+                db = Database()
+                is_whitelisted = db.is_whitelisted(guild_id, user_id)
+                
+                return jsonify({
+                    'guild_id': guild_id,
+                    'user_id': user_id,
+                    'is_whitelisted': is_whitelisted
+                })
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+        
+        @self.flask_app.route('/api/user/guilds/<int:user_id>')
+        def get_user_guilds(user_id):
+            """Получить серверы где пользователь в whitelist"""
+            if not self.bot.is_ready():
+                return jsonify({'error': 'Bot not ready'}), 503
+            
+            try:
+                from database import Database
+                db = Database()
+                
+                whitelisted_guilds = []
+                
+                for guild in self.bot.guilds:
+                    if db.is_whitelisted(guild.id, user_id):
+                        whitelisted_guilds.append({
+                            'id': guild.id,
+                            'name': guild.name,
+                            'icon': str(guild.icon.url) if guild.icon else None,
+                            'member_count': guild.member_count
+                        })
+                
+                return jsonify({
+                    'user_id': user_id,
+                    'guilds': whitelisted_guilds
                 })
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
