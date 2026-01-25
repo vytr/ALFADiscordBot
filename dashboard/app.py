@@ -5,6 +5,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 from urllib.parse import urlencode
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Конфигурация Discord OAuth
 DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "YOUR_CLIENT_ID")
