@@ -153,16 +153,90 @@ with tab1:
 with tab2:
     st.header("😴 Неактивные пользователи")
     
-    inactive_days = st.selectbox("📅 Период неактивности (дней)", [7, 14, 30], index=0, key="inactive_days")
+    # Получаем роли
+    @st.cache_data(ttl=300)
+    def get_guild_roles(guild_id):
+        try:
+            response = requests.get(f"{BOT_API_URL}/guild/{guild_id}/roles", timeout=5)
+            return response.json()
+        except:
+            return []
     
+    roles = get_guild_roles(guild_id)
+    
+    # Фильтры
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        inactive_days = st.selectbox(
+            "📅 Период неактивности (дней)", 
+            [7, 14, 30], 
+            index=0, 
+            key="inactive_days"
+        )
+    
+    with col2:
+        # Фильтр: ВКЛЮЧИТЬ только с этими ролями
+        include_roles = st.multiselect(
+            "✅ Показать только с ролями:",
+            options=roles,
+            format_func=lambda x: x['name'],
+            key="include_roles"
+        )
+    
+    with col3:
+        # Фильтр: ИСКЛЮЧИТЬ пользователей с этими ролями
+        exclude_roles = st.multiselect(
+            "❌ Исключить пользователей с ролями:",
+            options=roles,
+            format_func=lambda x: x['name'],
+            key="exclude_roles"
+        )
+    
+    # Получаем данные
     inactive_data = get_inactive_users(guild_id, inactive_days)
+    inactive_ids = inactive_data.get('inactive_user_ids', [])
+    
+    # Применяем фильтры по ролям
+    if include_roles or exclude_roles:
+        include_role_ids = {r['id'] for r in include_roles}
+        exclude_role_ids = {r['id'] for r in exclude_roles}
+        
+        filtered_ids = []
+        
+        for user_id in inactive_ids:
+            member = members_cache.get(user_id)
+            if not member:
+                continue
+            
+            user_roles = set(member.get('roles', []))
+            
+            # Если задан фильтр "включить" - проверяем наличие хотя бы одной роли
+            if include_role_ids:
+                if not (user_roles & include_role_ids):  # Пересечение множеств
+                    continue
+            
+            # Если задан фильтр "исключить" - пропускаем если есть хоть одна роль
+            if exclude_role_ids:
+                if user_roles & exclude_role_ids:
+                    continue
+            
+            filtered_ids.append(user_id)
+        
+        inactive_ids = filtered_ids
+        
+        # Обновляем метрики
+        inactive_data['inactive_members'] = len(inactive_ids)
     
     # Метрики
     col1, col2, col3 = st.columns(3)
     
     col1.metric("👥 Всего участников", inactive_data.get('total_members', 0))
     col2.metric("✅ Активных", inactive_data.get('active_members', 0))
-    col3.metric("❌ Неактивных", inactive_data.get('inactive_members', 0))
+    col3.metric(
+        "❌ Неактивных" + (" (с фильтром)" if (include_roles or exclude_roles) else ""),
+        len(inactive_ids)
+    )
     
     # Процент активности
     if inactive_data.get('total_members', 0) > 0:
@@ -193,25 +267,49 @@ with tab2:
     st.markdown("---")
     
     # Список неактивных
-    inactive_ids = inactive_data.get('inactive_user_ids', [])
-    
     if inactive_ids:
         st.subheader(f"📋 Список неактивных пользователей ({len(inactive_ids)})")
         
-        # Создаем DataFrame
-        inactive_df = pd.DataFrame({'user_id': inactive_ids})
+        # Показываем информацию о фильтрах
+        if include_roles:
+            st.info(f"✅ Фильтр: показаны только пользователи с ролями: {', '.join([r['name'] for r in include_roles])}")
+        if exclude_roles:
+            st.warning(f"❌ Фильтр: исключены пользователи с ролями: {', '.join([r['name'] for r in exclude_roles])}")
+        
+        # Создаем DataFrame с информацией о ролях
+        inactive_list = []
+        for user_id in inactive_ids:
+            member = members_cache.get(user_id)
+            if member:
+                # Получаем названия ролей
+                user_role_ids = member.get('roles', [])
+                user_role_names = [r['name'] for r in roles if r['id'] in user_role_ids]
+                
+                inactive_list.append({
+                    'user_id': user_id,
+                    'name': member['display_name'],
+                    'roles': ', '.join(user_role_names) if user_role_names else 'Нет ролей'
+                })
+            else:
+                inactive_list.append({
+                    'user_id': user_id,
+                    'name': f'User {user_id}',
+                    'roles': 'Неизвестно'
+                })
+        
+        inactive_df = pd.DataFrame(inactive_list)
         inactive_df['Пользователь'] = inactive_df['user_id'].apply(
             lambda x: make_discord_link(x, members_cache)
         )
         
-        # Выводим в виде таблицы
+        # Выводим таблицу с ролями
         st.markdown(
-            inactive_df[['Пользователь']].to_html(escape=False, index=False),
+            inactive_df[['Пользователь', 'roles']].rename(columns={'roles': 'Роли'}).to_html(escape=False, index=False),
             unsafe_allow_html=True
         )
         
         # Кнопка экспорта
-        csv = inactive_df[['user_id']].to_csv(index=False)
+        csv = inactive_df[['user_id', 'name', 'roles']].to_csv(index=False)
         st.download_button(
             label="📥 Скачать список (CSV)",
             data=csv,
@@ -219,8 +317,10 @@ with tab2:
             mime="text/csv"
         )
     else:
-        st.success("🎉 Все пользователи активны!")
-
+        if include_roles or exclude_roles:
+            st.info("🔍 Нет пользователей, соответствующих выбранным фильтрам")
+        else:
+            st.success("🎉 Все пользователи активны!")
 # ==================== ТАБ 3: ВЫГОВОРЫ ====================
 with tab3:
     st.header("⚠️ Система выговоров")
