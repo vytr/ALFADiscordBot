@@ -114,89 +114,6 @@ class APIServer(commands.Cog):
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
         
-        @self.flask_app.route('/api/guild/<int:guild_id>/inactive/<int:days>')
-        def get_inactive_users(guild_id, days):
-            if not self.bot.is_ready():
-                return jsonify({'error': 'Bot not ready'}), 503
-            
-            if days not in [7, 14, 30]:
-                return jsonify({'error': 'Invalid days parameter'}), 400
-            
-            try:
-                guild = self.bot.get_guild(guild_id)
-                if not guild:
-                    return jsonify({'error': 'Guild not found'}), 404
-                
-                # Все пользователи сервера (не боты)
-                all_members = [m.id for m in guild.members if not m.bot]
-                
-                # Получаем активных
-                all_stats = self.bot.db.get_all_users_stats(guild_id, days)
-                active_user_ids = {
-                    stat['user_id'] for stat in all_stats 
-                    if stat['period_messages'] > 0 or stat['period_voice_time'] > 0
-                }
-                
-                # Неактивные = все - активные
-                inactive_ids = [uid for uid in all_members if uid not in active_user_ids]
-                
-                return jsonify({
-                    'total_members': len(all_members),
-                    'active_members': len(active_user_ids),
-                    'inactive_members': len(inactive_ids),
-                    'inactive_user_ids': inactive_ids
-                })
-            except Exception as e:
-                return jsonify({'error': str(e)}), 500
-        
-        @self.flask_app.route('/api/guild/<int:guild_id>/warnings')
-        def get_warnings(guild_id):
-            if not self.bot.is_ready():
-                return jsonify({'error': 'Bot not ready'}), 503
-            
-            try:
-                import sqlite3
-                conn = sqlite3.connect(self.bot.db.db_path)
-                cursor = conn.cursor()
-                
-                # Общая статистика
-                cursor.execute('''
-                    SELECT 
-                        COUNT(*) as total,
-                        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active,
-                        COUNT(DISTINCT user_id) as unique_users
-                    FROM warnings
-                    WHERE guild_id = ?
-                ''', (guild_id,))
-                
-                stats = cursor.fetchone()
-                
-                # Топ нарушителей
-                cursor.execute('''
-                    SELECT user_id, COUNT(*) as warning_count
-                    FROM warnings
-                    WHERE guild_id = ? AND is_active = 1
-                    GROUP BY user_id
-                    ORDER BY warning_count DESC
-                    LIMIT 10
-                ''', (guild_id,))
-                
-                top_offenders = [
-                    {'user_id': row[0], 'warning_count': row[1]}
-                    for row in cursor.fetchall()
-                ]
-                
-                conn.close()
-                
-                return jsonify({
-                    'total_warnings': stats[0],
-                    'active_warnings': stats[1],
-                    'unique_users': stats[2],
-                    'top_offenders': top_offenders
-                })
-            except Exception as e:
-                return jsonify({'error': str(e)}), 500
-            
         @self.flask_app.route('/api/guild/<int:guild_id>/inactive/<int:days>/<activity_type>')
         def get_inactive_users(guild_id, days, activity_type):
             if not self.bot.is_ready():
@@ -251,6 +168,53 @@ class APIServer(commands.Cog):
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
         
+        @self.flask_app.route('/api/guild/<int:guild_id>/warnings')
+        def get_warnings(guild_id):
+            if not self.bot.is_ready():
+                return jsonify({'error': 'Bot not ready'}), 503
+            
+            try:
+                import sqlite3
+                conn = sqlite3.connect(self.bot.db.db_path)
+                cursor = conn.cursor()
+                
+                # Общая статистика
+                cursor.execute('''
+                    SELECT 
+                        COUNT(*) as total,
+                        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active,
+                        COUNT(DISTINCT user_id) as unique_users
+                    FROM warnings
+                    WHERE guild_id = ?
+                ''', (guild_id,))
+                
+                stats = cursor.fetchone()
+                
+                # Топ нарушителей
+                cursor.execute('''
+                    SELECT user_id, COUNT(*) as warning_count
+                    FROM warnings
+                    WHERE guild_id = ? AND is_active = 1
+                    GROUP BY user_id
+                    ORDER BY warning_count DESC
+                    LIMIT 10
+                ''', (guild_id,))
+                
+                top_offenders = [
+                    {'user_id': row[0], 'warning_count': row[1]}
+                    for row in cursor.fetchall()
+                ]
+                
+                conn.close()
+                
+                return jsonify({
+                    'total_warnings': stats[0],
+                    'active_warnings': stats[1],
+                    'unique_users': stats[2],
+                    'top_offenders': top_offenders
+                })
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
     
     def run_flask(self):
         """Запуск Flask сервера"""
