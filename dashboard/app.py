@@ -67,6 +67,9 @@ if 'user' not in st.session_state:
     st.session_state.user = None
 if 'access_token' not in st.session_state:
     st.session_state.access_token = None
+if 'session_id' not in st.session_state:
+    import uuid
+    st.session_state.session_id = str(uuid.uuid4())
 
 # Обработка OAuth callback
 query_params = st.query_params
@@ -83,6 +86,9 @@ if 'code' in query_params and st.session_state.user is None:
             # Получаем информацию о пользователе
             user_info = get_user_info(token_data['access_token'])
             st.session_state.user = user_info
+            
+            # Сохраняем в кэш для сохранения между перезагрузками
+            st.cache_data.clear()  # Очищаем старые данные
             
             # Очищаем query params
             st.query_params.clear()
@@ -101,17 +107,16 @@ if st.session_state.user is None:
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        st.markdown("<br>" * 3, unsafe_allow_html=True)
-        
-        st.info("""
-        **Требования для доступа:**
-        - Аккаунт Discord
-        - Наличие в whitelist хотя бы на одном сервере с ALFA Bot
-        """)
+        st.markdown("""
+        <div style="text-align: center; margin: 50px 0;">
+            <p style="font-size: 18px; color: #666;">Войдите через Discord для доступа к статистике бота</p>
+        </div>
+        """, unsafe_allow_html=True)
         
         auth_url = get_discord_auth_url()
+        
         st.markdown(f"""
-        <div style="text-align: center; margin-top: 30px;">
+        <div style="text-align: center;">
             <a href="{auth_url}" target="_self">
                 <button style="
                     background-color: #5865F2;
@@ -119,15 +124,30 @@ if st.session_state.user is None:
                     padding: 15px 40px;
                     font-size: 18px;
                     border: none;
-                    border-radius: 5px;
+                    border-radius: 8px;
                     cursor: pointer;
                     font-weight: bold;
                 ">
-                    🔗 Войти через Discord
+                    🔐 Войти через Discord
                 </button>
             </a>
         </div>
         """, unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div style="text-align: center; margin-top: 30px; color: #888; font-size: 14px;">
+            <p>✅ Доступ только для пользователей в whitelist</p>
+            <p>🔒 Безопасная авторизация через OAuth 2.0</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # JavaScript для сохранения состояния
+    st.markdown("""
+    <script>
+    // Сохраняем timestamp последней активности
+    localStorage.setItem('lastActivity', Date.now());
+    </script>
+    """, unsafe_allow_html=True)
     
     st.stop()
 
