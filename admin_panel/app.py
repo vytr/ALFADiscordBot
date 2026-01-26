@@ -370,19 +370,23 @@ with tab1:
             except:
                 st.warning("Не удалось загрузить изображение")
 
-            # Кнопка удаления
-            if st.button("🗑️ Удалить логотип", key="delete_logo"):
-                if delete_logo(guild_id, st.session_state.access_token):
-                    st.success("Логотип удалён")
-                    st.rerun()
-                else:
-                    st.error("Ошибка удаления логотипа")
+            # Кнопка удаления (удаляет логотип и сбрасывает аватарку бота)
+            if st.button("🗑️ Удалить аватарку", key="delete_logo"):
+                with st.spinner("Удаляем аватарку..."):
+                    # Сбрасываем аватарку бота к глобальной
+                    reset_bot_avatar(guild_id, st.session_state.access_token)
+                    # Удаляем файл логотипа
+                    if delete_logo(guild_id, st.session_state.access_token):
+                        st.success("Аватарка удалена и сброшена к глобальной")
+                        st.rerun()
+                    else:
+                        st.error("Ошибка удаления аватарки")
 
-        # Загрузка нового логотипа
+        # Загрузка нового логотипа (аватарки бота)
         uploaded_file = st.file_uploader(
-            "Загрузить новый логотип",
+            "Загрузить аватарку бота",
             type=['png', 'jpg', 'jpeg', 'gif', 'webp'],
-            help="Максимум 10 МБ. Форматы: PNG, JPG, GIF, WebP"
+            help="Максимум 10 МБ. Будет использоваться как аватарка бота на этом сервере"
         )
 
         if uploaded_file:
@@ -390,49 +394,16 @@ with tab1:
             if uploaded_file.size > 10 * 1024 * 1024:
                 st.error("Файл слишком большой. Максимум 10 МБ")
             else:
-                st.image(uploaded_file, width=128, caption="Превью")
-                if st.button("📤 Загрузить", key="upload_logo"):
-                    result = upload_logo(guild_id, st.session_state.access_token, uploaded_file)
-                    if 'error' in result:
-                        st.error(f"Ошибка: {result['error']}")
-                    else:
-                        st.success("Логотип загружен!")
-                        st.rerun()
+                st.image(uploaded_file, width=128, caption="Превью новой аватарки")
 
         # Или URL вручную
         logo_url = st.text_input(
-            "Или укажите URL логотипа",
+            "Или укажите URL аватарки",
             value='' if current_logo and current_logo.startswith('/') else (current_logo or ''),
             help="Внешняя ссылка на изображение"
         )
 
-        # Секция для серверной аватарки бота
-        st.markdown("---")
-        st.markdown("**Аватарка бота на сервере**")
-        st.caption("Установить загруженный логотип как аватарку бота на этом сервере")
-
-        col_avatar1, col_avatar2 = st.columns(2)
-
-        with col_avatar1:
-            if st.button("🤖 Применить как аватарку бота", key="apply_bot_avatar", use_container_width=True):
-                if not current_logo:
-                    st.error("Сначала загрузите логотип")
-                else:
-                    with st.spinner("Применяем аватарку..."):
-                        result = apply_bot_avatar(guild_id, st.session_state.access_token)
-                        if 'error' in result:
-                            st.error(f"Ошибка: {result['error']}")
-                        else:
-                            st.success("Аватарка бота обновлена на этом сервере!")
-
-        with col_avatar2:
-            if st.button("↩️ Сбросить аватарку", key="reset_bot_avatar", use_container_width=True):
-                with st.spinner("Сбрасываем аватарку..."):
-                    result = reset_bot_avatar(guild_id, st.session_state.access_token)
-                    if 'error' in result:
-                        st.error(f"Ошибка: {result['error']}")
-                    else:
-                        st.success("Аватарка бота сброшена к глобальной!")
+        st.caption("💡 Аватарка будет автоматически применена при сохранении настроек")
 
 # ==================== ТАБ 2: ТЕКСТЫ ====================
 
@@ -519,26 +490,50 @@ col1, col2, col3 = st.columns([2, 1, 1])
 
 with col1:
     if st.button("💾 Сохранить настройки", type="primary", use_container_width=True):
-        # Определяем logo_url: если введён URL вручную — используем его,
-        # иначе сохраняем текущий (загруженный файл)
+        save_success = True
+        avatar_applied = False
+
+        # 1. Если есть загруженный файл - сначала загружаем его
+        if uploaded_file and uploaded_file.size <= 10 * 1024 * 1024:
+            with st.spinner("Загружаем аватарку..."):
+                result = upload_logo(guild_id, st.session_state.access_token, uploaded_file)
+                if 'error' in result:
+                    st.error(f"Ошибка загрузки аватарки: {result['error']}")
+                    save_success = False
+
+        # 2. Определяем logo_url
         current_logo = settings.get('logo_url')
         final_logo_url = logo_url if logo_url else (current_logo if current_logo and current_logo.startswith('/') else None)
 
-        new_settings = {
-            'bot_name': bot_name,
-            'primary_color': primary_color,
-            'secondary_color': secondary_color,
-            'panel_title': panel_title,
-            'welcome_message': welcome_message,
-            'logo_url': final_logo_url,
-            'footer_text': footer_text
-        }
+        # 3. Сохраняем настройки
+        if save_success:
+            new_settings = {
+                'bot_name': bot_name,
+                'primary_color': primary_color,
+                'secondary_color': secondary_color,
+                'panel_title': panel_title,
+                'welcome_message': welcome_message,
+                'logo_url': final_logo_url,
+                'footer_text': footer_text
+            }
 
-        if update_guild_settings(guild_id, st.session_state.access_token, new_settings):
-            st.success("✅ Настройки сохранены!")
-            st.balloons()
-        else:
-            st.error("❌ Ошибка сохранения настроек")
+            if update_guild_settings(guild_id, st.session_state.access_token, new_settings):
+                # 4. Применяем аватарку бота если есть логотип
+                if uploaded_file or final_logo_url:
+                    with st.spinner("Применяем аватарку бота..."):
+                        avatar_result = apply_bot_avatar(guild_id, st.session_state.access_token)
+                        if 'error' not in avatar_result:
+                            avatar_applied = True
+                        else:
+                            st.warning(f"Настройки сохранены, но аватарка не применена: {avatar_result['error']}")
+
+                if avatar_applied:
+                    st.success("✅ Настройки сохранены и аватарка бота обновлена!")
+                else:
+                    st.success("✅ Настройки сохранены!")
+                st.balloons()
+            else:
+                st.error("❌ Ошибка сохранения настроек")
 
 with col2:
     if st.button("🔄 Обновить", use_container_width=True):
