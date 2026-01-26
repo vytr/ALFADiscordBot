@@ -5,10 +5,9 @@ import requests
 import os
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
-
+ 
 # Загружаем .env из корня проекта
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
-
 # Папка для загрузки логотипов
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads', 'logos')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
