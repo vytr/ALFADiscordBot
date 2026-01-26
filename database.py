@@ -124,6 +124,22 @@ class Database:
             )
         ''')
 
+        # Таблица настроек сервера (для кастомизации бота)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS guild_settings (
+                guild_id INTEGER PRIMARY KEY,
+                bot_name TEXT DEFAULT 'GuildBrew',
+                primary_color TEXT DEFAULT '#5865F2',
+                secondary_color TEXT DEFAULT '#2ECC71',
+                panel_title TEXT DEFAULT 'GuildBrew Control Panel',
+                welcome_message TEXT DEFAULT 'Добро пожаловать в панель управления!',
+                logo_url TEXT,
+                footer_text TEXT DEFAULT 'GuildBrew • Панель управления',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         # Старые таблицы опросов (оставляем для совместимости, но не используем)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS polls (
@@ -277,6 +293,129 @@ class Database:
         results = cursor.fetchall()
         conn.close()
         return results
+
+    # ========================================
+    # GUILD SETTINGS МЕТОДЫ
+    # ========================================
+
+    def get_guild_settings(self, guild_id: int) -> dict:
+        """Получить настройки сервера (с дефолтными значениями если не заданы)"""
+        defaults = {
+            'guild_id': guild_id,
+            'bot_name': 'GuildBrew',
+            'primary_color': '#5865F2',
+            'secondary_color': '#2ECC71',
+            'panel_title': 'GuildBrew Control Panel',
+            'welcome_message': 'Добро пожаловать в панель управления!\nВыберите нужный раздел, нажав на кнопку ниже.',
+            'logo_url': None,
+            'footer_text': 'GuildBrew • Панель управления',
+            'created_at': None,
+            'updated_at': None
+        }
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                SELECT guild_id, bot_name, primary_color, secondary_color,
+                       panel_title, welcome_message, logo_url, footer_text,
+                       created_at, updated_at
+                FROM guild_settings
+                WHERE guild_id = ?
+            ''', (guild_id,))
+
+            result = cursor.fetchone()
+            conn.close()
+
+            if not result:
+                return defaults
+
+            return {
+                'guild_id': result[0],
+                'bot_name': result[1] or defaults['bot_name'],
+                'primary_color': result[2] or defaults['primary_color'],
+                'secondary_color': result[3] or defaults['secondary_color'],
+                'panel_title': result[4] or defaults['panel_title'],
+                'welcome_message': result[5] or defaults['welcome_message'],
+                'logo_url': result[6],
+                'footer_text': result[7] or defaults['footer_text'],
+                'created_at': result[8],
+                'updated_at': result[9]
+            }
+        except Exception as e:
+            print(f"Error getting guild settings: {e}")
+            return defaults
+
+    def update_guild_settings(self, guild_id: int, **settings) -> bool:
+        """Обновить настройки сервера (upsert)"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Получаем текущие настройки
+            current = self.get_guild_settings(guild_id)
+
+            # Объединяем с новыми
+            new_settings = {
+                'bot_name': settings.get('bot_name', current['bot_name']),
+                'primary_color': settings.get('primary_color', current['primary_color']),
+                'secondary_color': settings.get('secondary_color', current['secondary_color']),
+                'panel_title': settings.get('panel_title', current['panel_title']),
+                'welcome_message': settings.get('welcome_message', current['welcome_message']),
+                'logo_url': settings.get('logo_url', current['logo_url']),
+                'footer_text': settings.get('footer_text', current['footer_text']),
+            }
+
+            cursor.execute('''
+                INSERT INTO guild_settings
+                    (guild_id, bot_name, primary_color, secondary_color,
+                     panel_title, welcome_message, logo_url, footer_text, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(guild_id) DO UPDATE SET
+                    bot_name = excluded.bot_name,
+                    primary_color = excluded.primary_color,
+                    secondary_color = excluded.secondary_color,
+                    panel_title = excluded.panel_title,
+                    welcome_message = excluded.welcome_message,
+                    logo_url = excluded.logo_url,
+                    footer_text = excluded.footer_text,
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (
+                guild_id,
+                new_settings['bot_name'],
+                new_settings['primary_color'],
+                new_settings['secondary_color'],
+                new_settings['panel_title'],
+                new_settings['welcome_message'],
+                new_settings['logo_url'],
+                new_settings['footer_text']
+            ))
+
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error updating guild settings: {e}")
+            return False
+
+    def reset_guild_settings(self, guild_id: int) -> bool:
+        """Сбросить настройки сервера к дефолтным (удалить запись)"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                DELETE FROM guild_settings
+                WHERE guild_id = ?
+            ''', (guild_id,))
+
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error resetting guild settings: {e}")
+            return False
 
     # ========================================
     # СТАТИСТИКА МЕТОДЫ

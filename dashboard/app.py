@@ -49,6 +49,17 @@ def get_user_info(access_token):
     response = requests.get('https://discord.com/api/users/@me', headers=headers)
     return response.json()
 
+
+def get_guild_branding(guild_id):
+    """Получает настройки брендинга сервера"""
+    try:
+        response = requests.get(f"{BOT_API_URL}/admin/guild/{guild_id}/settings", timeout=5)
+        if response.status_code == 200:
+            return response.json()
+        return {}
+    except:
+        return {}
+
 def get_user_whitelisted_guilds(user_id):
     """Получает серверы где пользователь в whitelist"""
     try:
@@ -220,10 +231,6 @@ def make_discord_link(user_id, members_cache):
         return f'<img src="{avatar}" width="24" style="border-radius:50%; vertical-align:middle; margin-right:8px;"><a href="https://discord.com/users/{user_id}" target="_blank" style="text-decoration:none; color:#5865F2; font-weight:500;">{name}</a>'
     return f'<a href="https://discord.com/users/{user_id}" target="_blank" style="color:#5865F2;">User {user_id}</a>'
 
-# ==================== HEADER ====================
-
-st.title("📊 GuildBrew Dashboard")
-
 # ==================== ВЫБОР СЕРВЕРА ====================
 
 guild = st.sidebar.selectbox(
@@ -234,6 +241,15 @@ guild = st.sidebar.selectbox(
 
 guild_id = guild['id']
 members_cache = get_guild_members(guild_id)
+
+# ==================== БРЕНДИНГ ====================
+
+branding = get_guild_branding(guild_id)
+bot_name = branding.get('bot_name', 'GuildBrew')
+
+# ==================== HEADER ====================
+
+st.title(f"📊 {bot_name} Dashboard")
 
 # Информация о сервере
 st.sidebar.markdown("---")
@@ -582,4 +598,4 @@ with tab4:
         st.plotly_chart(fig3, use_container_width=True)
 
 st.markdown("---")
-st.markdown("**GuildBrew Dashboard** • Обновляется каждую минуту")
+st.markdown(f"**{bot_name} Dashboard** • Обновляется каждую минуту")

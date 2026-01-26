@@ -745,17 +745,21 @@ class StatsView(discord.ui.View):
 
     @discord.ui.button(label="🔙 Назад", style=discord.ButtonStyle.red, custom_id="back_to_main")
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Возвращаемся к главной панели
+        # Возвращаемся к главной панели с кастомными настройками
+        settings = self.get_settings(interaction.guild.id)
+        primary_color = int(settings['primary_color'].lstrip('#'), 16)
+
         embed = discord.Embed(
-            title="🎛️ GuildBrew Control Panel",
-            description="Добро пожаловать в панель управления!\nВыберите нужный раздел, нажав на кнопку ниже.",
-            color=0x2ECC71,
+            title=f"🎛️ {settings['panel_title']}",
+            description=settings['welcome_message'],
+            color=primary_color,
             timestamp=datetime.utcnow()
         )
+        logo_url = settings.get('logo_url') or (self.bot.user.avatar.url if self.bot.user.avatar else None)
         embed.set_thumbnail(url=self.bot.user.avatar.url if self.bot.user.avatar else None)
-        embed.set_footer(text="GuildBrew • Панель управления", icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None)
+        embed.set_footer(text=settings['footer_text'], icon_url=logo_url)
 
-        await interaction.response.edit_message(embed=embed, view=PanelView(self.bot))
+        await interaction.response.edit_message(embed=embed, view=PanelView(self.bot, interaction.guild.id))
 
     @discord.ui.button(label="😴 Неактивные", style=discord.ButtonStyle.gray, custom_id="inactive_users", row=3)
     async def inactive_users(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -786,10 +790,24 @@ class StatsView(discord.ui.View):
 
 class PanelView(discord.ui.View):
     """Главная панель управления"""
-    
-    def __init__(self, bot):
+
+    def __init__(self, bot, guild_id: int = None):
         super().__init__(timeout=180)
         self.bot = bot
+        self.guild_id = guild_id
+
+    def get_settings(self, guild_id: int = None) -> dict:
+        """Получить настройки сервера"""
+        gid = guild_id or self.guild_id
+        if gid:
+            return self.bot.db.get_guild_settings(gid)
+        return {
+            'panel_title': 'GuildBrew Control Panel',
+            'welcome_message': 'Добро пожаловать в панель управления!\nВыберите нужный раздел, нажав на кнопку ниже.',
+            'primary_color': '#5865F2',
+            'footer_text': 'GuildBrew • Панель управления',
+            'logo_url': None
+        }
     
     @discord.ui.button(label="📈 Stats", style=discord.ButtonStyle.blurple, custom_id="stats_panel", row=0)
     async def stats(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1002,40 +1020,45 @@ class WhitelistView(discord.ui.View):
     
     @discord.ui.button(label="🔙 Назад", style=discord.ButtonStyle.gray, custom_id="back_to_main_from_whitelist", row=1)
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Получаем кастомные настройки сервера
+        settings = self.bot.db.get_guild_settings(interaction.guild.id)
+        primary_color = int(settings['primary_color'].lstrip('#'), 16)
+
         embed = discord.Embed(
-            title="🎛️ GuildBrew Control Panel",
-            description="Добро пожаловать в панель управления!\nВыберите нужный раздел, нажав на кнопку ниже.",
-            color=0x5865F2,
+            title=f"🎛️ {settings['panel_title']}",
+            description=settings['welcome_message'],
+            color=primary_color,
             timestamp=datetime.utcnow()
         )
-        
+
         embed.add_field(
             name="📈 Stats",
             value="Статистика пользователей и активности",
             inline=True
         )
-        
+
         embed.add_field(
             name="👥 Whitelist",
             value="Управление whitelist пользователями",
             inline=True
         )
-        
+
         embed.add_field(
             name="📊 Polls",
             value="Создание и управление опросами",
             inline=True
         )
-        
+
         embed.add_field(
             name="⚠️ Warnings",
             value="Система выговоров и модерация",
             inline=True
         )
-        
-        embed.set_footer(text=f"Запросил: {interaction.user.name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
-        
-        await interaction.response.edit_message(embed=embed, view=PanelView(self.bot))
+
+        logo_url = settings.get('logo_url') or (interaction.user.avatar.url if interaction.user.avatar else None)
+        embed.set_footer(text=settings['footer_text'], icon_url=logo_url)
+
+        await interaction.response.edit_message(embed=embed, view=PanelView(self.bot, interaction.guild.id))
 
 
 class WhitelistAddModal(discord.ui.Modal, title="➕ Добавить в whitelist"):
@@ -1762,41 +1785,45 @@ class WarningsView(discord.ui.View):
     
     @discord.ui.button(label="🔙 Назад", style=discord.ButtonStyle.red, custom_id="back_to_main_from_warnings", row=2)
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Возвращаемся к главной панели
+        # Получаем кастомные настройки сервера
+        settings = self.bot.db.get_guild_settings(interaction.guild.id)
+        primary_color = int(settings['primary_color'].lstrip('#'), 16)
+
         embed = discord.Embed(
-            title="🎛️ GuildBrew Control Panel",
-            description="Добро пожаловать в панель управления!\nВыберите нужный раздел, нажав на кнопку ниже.",
-            color=0x5865F2,
+            title=f"🎛️ {settings['panel_title']}",
+            description=settings['welcome_message'],
+            color=primary_color,
             timestamp=datetime.utcnow()
         )
-        
+
         embed.add_field(
             name="📈 Stats",
             value="Статистика пользователей и активности",
             inline=True
         )
-        
+
         embed.add_field(
             name="👥 Whitelist",
             value="Управление whitelist пользователями",
             inline=True
         )
-        
+
         embed.add_field(
             name="📊 Polls",
             value="Создание и управление опросами",
             inline=True
         )
-        
+
         embed.add_field(
             name="⚠️ Warnings",
             value="Система выговоров и модерация",
             inline=True
         )
-        
-        embed.set_footer(text=f"Запросил: {interaction.user.name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
-        
-        await interaction.response.edit_message(embed=embed, view=PanelView(self.bot))
+
+        logo_url = settings.get('logo_url') or (interaction.user.avatar.url if interaction.user.avatar else None)
+        embed.set_footer(text=settings['footer_text'], icon_url=logo_url)
+
+        await interaction.response.edit_message(embed=embed, view=PanelView(self.bot, interaction.guild.id))
 
 
 class WarnUserModal(discord.ui.Modal, title="⚠️ Выдать выговор"):
@@ -2303,6 +2330,10 @@ class Panel(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    def get_guild_settings(self, guild_id: int) -> dict:
+        """Получить настройки сервера для панели"""
+        return self.bot.db.get_guild_settings(guild_id)
+
     @discord.app_commands.command(name="panel", description="🎛️ Панель управления GuildBrew")
     async def panel(self, interaction: discord.Interaction):
         # Проверка прав: администратор или в whitelist
@@ -2314,11 +2345,15 @@ class Panel(commands.Cog):
                     ephemeral=True
                 )
                 return
-        
+
+        # Получаем кастомные настройки сервера
+        settings = self.get_guild_settings(interaction.guild.id)
+        primary_color = int(settings['primary_color'].lstrip('#'), 16)
+
         embed = discord.Embed(
-            title="🎛️ GuildBrew Control Panel",
-            description="Добро пожаловать в панель управления!\nВыберите нужный раздел, нажав на кнопку ниже.",
-            color=0x5865F2,
+            title=f"🎛️ {settings['panel_title']}",
+            description=settings['welcome_message'],
+            color=primary_color,
             timestamp=datetime.utcnow()
         )
         
@@ -2346,9 +2381,11 @@ class Panel(commands.Cog):
             inline=True
         )
         
-        embed.set_footer(text=f"Запросил: {interaction.user.name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
-        
-        await interaction.response.send_message(embed=embed, view=PanelView(self.bot), ephemeral=True)
+        # Используем кастомный footer или дефолтный с именем пользователя
+        logo_url = settings.get('logo_url') or (interaction.user.avatar.url if interaction.user.avatar else None)
+        embed.set_footer(text=settings['footer_text'], icon_url=logo_url)
+
+        await interaction.response.send_message(embed=embed, view=PanelView(self.bot, interaction.guild.id), ephemeral=True)
 
 
 

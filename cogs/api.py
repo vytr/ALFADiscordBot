@@ -1,6 +1,7 @@
 from discord.ext import commands
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import threading
+import requests
 
 class APIServer(commands.Cog):
     """Flask API для dashboard"""
@@ -259,7 +260,156 @@ class APIServer(commands.Cog):
                 })
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
-    
+
+        # ==================== ADMIN PANEL ENDPOINTS ====================
+
+        def verify_discord_admin(access_token: str, guild_id: int) -> bool:
+            """Проверить является ли пользователь администратором сервера через Discord API"""
+            try:
+                headers = {'Authorization': f'Bearer {access_token}'}
+                response = requests.get(
+                    'https://discord.com/api/users/@me/guilds',
+                    headers=headers,
+                    timeout=10
+                )
+
+                if response.status_code != 200:
+                    return False
+
+                guilds = response.json()
+                for guild in guilds:
+                    if int(guild['id']) == guild_id:
+                        permissions = int(guild.get('permissions', 0))
+                        # Бит 0x8 = Administrator permission
+                        return (permissions & 0x8) == 0x8
+
+                return False
+            except Exception as e:
+                print(f"Error verifying Discord admin: {e}")
+                return False
+
+        @self.flask_app.route('/api/admin/guilds')
+        def get_admin_guilds():
+            """Получить серверы где пользователь является администратором"""
+            if not self.bot.is_ready():
+                return jsonify({'error': 'Bot not ready'}), 503
+
+            access_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+            if not access_token:
+                return jsonify({'error': 'Authorization header required'}), 401
+
+            try:
+                # Получаем серверы пользователя из Discord API
+                headers = {'Authorization': f'Bearer {access_token}'}
+                response = requests.get(
+                    'https://discord.com/api/users/@me/guilds',
+                    headers=headers,
+                    timeout=10
+                )
+
+                if response.status_code != 200:
+                    return jsonify({'error': 'Failed to fetch user guilds from Discord'}), 401
+
+                user_guilds = response.json()
+
+                # Фильтруем: только серверы где юзер админ И бот присутствует
+                bot_guild_ids = {g.id for g in self.bot.guilds}
+                admin_guilds = []
+
+                for guild in user_guilds:
+                    guild_id = int(guild['id'])
+                    permissions = int(guild.get('permissions', 0))
+                    is_admin = (permissions & 0x8) == 0x8
+
+                    if is_admin and guild_id in bot_guild_ids:
+                        bot_guild = self.bot.get_guild(guild_id)
+                        admin_guilds.append({
+                            'id': guild_id,
+                            'name': guild['name'],
+                            'icon': f"https://cdn.discordapp.com/icons/{guild_id}/{guild['icon']}.png" if guild.get('icon') else None,
+                            'member_count': bot_guild.member_count if bot_guild else 0
+                        })
+
+                return jsonify({'guilds': admin_guilds})
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        @self.flask_app.route('/api/admin/guild/<int:guild_id>/settings', methods=['GET'])
+        def get_guild_settings(guild_id):
+            """Получить настройки сервера"""
+            if not self.bot.is_ready():
+                return jsonify({'error': 'Bot not ready'}), 503
+
+            try:
+                settings = self.bot.db.get_guild_settings(guild_id)
+                return jsonify(settings)
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        @self.flask_app.route('/api/admin/guild/<int:guild_id>/settings', methods=['PUT'])
+        def update_guild_settings(guild_id):
+            """Обновить настройки сервера (требует токен администратора)"""
+            if not self.bot.is_ready():
+                return jsonify({'error': 'Bot not ready'}), 503
+
+            access_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+            if not access_token:
+                return jsonify({'error': 'Authorization header required'}), 401
+
+            # Проверяем что пользователь админ этого сервера
+            if not verify_discord_admin(access_token, guild_id):
+                return jsonify({'error': 'You must be an administrator of this server'}), 403
+
+            try:
+                data = request.get_json()
+                if not data:
+                    return jsonify({'error': 'No data provided'}), 400
+
+                # Разрешённые поля для обновления
+                allowed_fields = [
+                    'bot_name', 'primary_color', 'secondary_color',
+                    'panel_title', 'welcome_message', 'logo_url', 'footer_text'
+                ]
+
+                # Фильтруем только разрешённые поля
+                filtered_data = {k: v for k, v in data.items() if k in allowed_fields}
+
+                if not filtered_data:
+                    return jsonify({'error': 'No valid fields provided'}), 400
+
+                success = self.bot.db.update_guild_settings(guild_id, **filtered_data)
+
+                if success:
+                    return jsonify({'success': True, 'message': 'Settings updated'})
+                else:
+                    return jsonify({'error': 'Failed to update settings'}), 500
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        @self.flask_app.route('/api/admin/guild/<int:guild_id>/settings', methods=['DELETE'])
+        def reset_guild_settings(guild_id):
+            """Сбросить настройки сервера к дефолтным"""
+            if not self.bot.is_ready():
+                return jsonify({'error': 'Bot not ready'}), 503
+
+            access_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+            if not access_token:
+                return jsonify({'error': 'Authorization header required'}), 401
+
+            # Проверяем что пользователь админ этого сервера
+            if not verify_discord_admin(access_token, guild_id):
+                return jsonify({'error': 'You must be an administrator of this server'}), 403
+
+            try:
+                success = self.bot.db.reset_guild_settings(guild_id)
+
+                if success:
+                    return jsonify({'success': True, 'message': 'Settings reset to defaults'})
+                else:
+                    return jsonify({'error': 'Failed to reset settings'}), 500
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
     def run_flask(self):
         """Запуск Flask сервера"""
         self.flask_app.run(host='127.0.0.1', port=5555, debug=False, use_reloader=False)
