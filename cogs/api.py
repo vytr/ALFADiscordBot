@@ -559,25 +559,35 @@ class APIServer(commands.Cog):
                     except Exception as e:
                         return jsonify({'error': f'Failed to fetch logo: {str(e)}'}), 400
 
-                # Определяем MIME тип
-                import imghdr
-                image_type = imghdr.what(None, h=image_data)
-                if image_type not in ['png', 'jpeg', 'gif', 'webp']:
-                    # Попробуем определить по расширению
-                    if logo_url.lower().endswith('.jpg') or logo_url.lower().endswith('.jpeg'):
-                        image_type = 'jpeg'
-                    elif logo_url.lower().endswith('.png'):
-                        image_type = 'png'
-                    elif logo_url.lower().endswith('.gif'):
-                        image_type = 'gif'
-                    elif logo_url.lower().endswith('.webp'):
-                        image_type = 'webp'
-                    else:
-                        image_type = 'png'  # default
+                # Ресайзим изображение для Discord (макс 256x256, рекомендуется PNG)
+                from PIL import Image
+                import io as io_module
 
-                mime_type = f"image/{image_type}"
-                if image_type == 'jpeg':
-                    mime_type = 'image/jpeg'
+                # Открываем изображение
+                img = Image.open(io_module.BytesIO(image_data))
+
+                # Конвертируем в RGB если нужно (для RGBA/P режимов)
+                if img.mode in ('RGBA', 'P'):
+                    # Сохраняем альфа-канал для PNG
+                    img = img.convert('RGBA')
+                else:
+                    img = img.convert('RGB')
+
+                # Ресайзим до 256x256 (Discord рекомендует квадратные аватарки)
+                max_size = 256
+                if img.width > max_size or img.height > max_size:
+                    img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+
+                # Сохраняем в PNG формат
+                output_buffer = io_module.BytesIO()
+                if img.mode == 'RGBA':
+                    img.save(output_buffer, format='PNG', optimize=True)
+                    mime_type = 'image/png'
+                else:
+                    img.save(output_buffer, format='PNG', optimize=True)
+                    mime_type = 'image/png'
+
+                image_data = output_buffer.getvalue()
 
                 # Формируем data URI для Discord API
                 base64_image = base64.b64encode(image_data).decode('utf-8')
@@ -608,7 +618,10 @@ class APIServer(commands.Cog):
                     })
                 elif api_response.status_code == 400:
                     error_data = api_response.json()
-                    return jsonify({'error': f"Discord API error: {error_data.get('message', 'Bad request')}"}), 400
+                    # Показываем полную информацию об ошибке
+                    error_msg = error_data.get('message', 'Bad request')
+                    errors_detail = error_data.get('errors', {})
+                    return jsonify({'error': f"Discord API error: {error_msg}", 'details': errors_detail}), 400
                 elif api_response.status_code == 403:
                     return jsonify({'error': 'Bot does not have permission to change avatar on this server'}), 403
                 elif api_response.status_code == 429:
