@@ -263,34 +263,24 @@ class APIServer(commands.Cog):
 
         # ==================== ADMIN PANEL ENDPOINTS ====================
 
-        def verify_discord_admin(access_token: str, guild_id: int) -> bool:
-            """Проверить является ли пользователь администратором сервера через Discord API"""
+        def get_user_id_from_token(access_token: str) -> int | None:
+            """Получить user_id из Discord access token"""
             try:
                 headers = {'Authorization': f'Bearer {access_token}'}
                 response = requests.get(
-                    'https://discord.com/api/users/@me/guilds',
+                    'https://discord.com/api/users/@me',
                     headers=headers,
                     timeout=10
                 )
-
-                if response.status_code != 200:
-                    return False
-
-                guilds = response.json()
-                for guild in guilds:
-                    if int(guild['id']) == guild_id:
-                        permissions = int(guild.get('permissions', 0))
-                        # Бит 0x8 = Administrator permission
-                        return (permissions & 0x8) == 0x8
-
-                return False
-            except Exception as e:
-                print(f"Error verifying Discord admin: {e}")
-                return False
+                if response.status_code == 200:
+                    return int(response.json()['id'])
+                return None
+            except:
+                return None
 
         @self.flask_app.route('/api/admin/guilds')
         def get_admin_guilds():
-            """Получить серверы где пользователь является администратором"""
+            """Получить серверы где пользователь в whitelist"""
             if not self.bot.is_ready():
                 return jsonify({'error': 'Bot not ready'}), 503
 
@@ -299,35 +289,30 @@ class APIServer(commands.Cog):
                 return jsonify({'error': 'Authorization header required'}), 401
 
             try:
-                # Получаем серверы пользователя из Discord API
+                # Получаем user_id из Discord API
                 headers = {'Authorization': f'Bearer {access_token}'}
                 response = requests.get(
-                    'https://discord.com/api/users/@me/guilds',
+                    'https://discord.com/api/users/@me',
                     headers=headers,
                     timeout=10
                 )
 
                 if response.status_code != 200:
-                    return jsonify({'error': 'Failed to fetch user guilds from Discord'}), 401
+                    return jsonify({'error': 'Failed to fetch user from Discord'}), 401
 
-                user_guilds = response.json()
+                user_data = response.json()
+                user_id = int(user_data['id'])
 
-                # Фильтруем: только серверы где юзер админ И бот присутствует
-                bot_guild_ids = {g.id for g in self.bot.guilds}
+                # Получаем серверы бота и проверяем whitelist
                 admin_guilds = []
 
-                for guild in user_guilds:
-                    guild_id = int(guild['id'])
-                    permissions = int(guild.get('permissions', 0))
-                    is_admin = (permissions & 0x8) == 0x8
-
-                    if is_admin and guild_id in bot_guild_ids:
-                        bot_guild = self.bot.get_guild(guild_id)
+                for bot_guild in self.bot.guilds:
+                    if self.bot.db.is_whitelisted(bot_guild.id, user_id):
                         admin_guilds.append({
-                            'id': guild_id,
-                            'name': guild['name'],
-                            'icon': f"https://cdn.discordapp.com/icons/{guild_id}/{guild['icon']}.png" if guild.get('icon') else None,
-                            'member_count': bot_guild.member_count if bot_guild else 0
+                            'id': bot_guild.id,
+                            'name': bot_guild.name,
+                            'icon': str(bot_guild.icon.url) if bot_guild.icon else None,
+                            'member_count': bot_guild.member_count
                         })
 
                 return jsonify({'guilds': admin_guilds})
@@ -356,9 +341,10 @@ class APIServer(commands.Cog):
             if not access_token:
                 return jsonify({'error': 'Authorization header required'}), 401
 
-            # Проверяем что пользователь админ этого сервера
-            if not verify_discord_admin(access_token, guild_id):
-                return jsonify({'error': 'You must be an administrator of this server'}), 403
+            # Получаем user_id и проверяем whitelist
+            user_id = get_user_id_from_token(access_token)
+            if not user_id or not self.bot.db.is_whitelisted(guild_id, user_id):
+                return jsonify({'error': 'Access denied'}), 403
 
             try:
                 data = request.get_json()
@@ -396,9 +382,10 @@ class APIServer(commands.Cog):
             if not access_token:
                 return jsonify({'error': 'Authorization header required'}), 401
 
-            # Проверяем что пользователь админ этого сервера
-            if not verify_discord_admin(access_token, guild_id):
-                return jsonify({'error': 'You must be an administrator of this server'}), 403
+            # Получаем user_id и проверяем whitelist
+            user_id = get_user_id_from_token(access_token)
+            if not user_id or not self.bot.db.is_whitelisted(guild_id, user_id):
+                return jsonify({'error': 'Access denied'}), 403
 
             try:
                 success = self.bot.db.reset_guild_settings(guild_id)
