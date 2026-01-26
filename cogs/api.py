@@ -4,6 +4,10 @@ import threading
 import requests
 import os
 from werkzeug.utils import secure_filename
+from dotenv import load_dotenv
+
+# Загружаем .env из корня проекта
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
 
 # Папка для загрузки логотипов
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads', 'logos')
@@ -582,7 +586,7 @@ class APIServer(commands.Cog):
 
                 # Используем Discord API для установки серверной аватарки бота
                 # PATCH /guilds/{guild.id}/members/@me
-                bot_token = os.getenv('DISCORD_BOT_TOKEN')
+                bot_token = os.getenv('DISCORD_TOKEN')
                 if not bot_token:
                     return jsonify({'error': 'Bot token not configured'}), 500
 
@@ -637,7 +641,7 @@ class APIServer(commands.Cog):
                 return jsonify({'error': 'Guild not found'}), 404
 
             try:
-                bot_token = os.getenv('DISCORD_BOT_TOKEN')
+                bot_token = os.getenv('DISCORD_TOKEN')
                 if not bot_token:
                     return jsonify({'error': 'Bot token not configured'}), 500
 
