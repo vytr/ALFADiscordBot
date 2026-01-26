@@ -9,7 +9,7 @@ class Whitelist(commands.Cog):
         self.bot = bot
         self.db = db
 
-    @commands.command(name='alfa_whitelist_add')
+    @commands.command(name='gb_whitelist_add')
     @commands.has_permissions(administrator=True)
     async def whitelist_add(self, ctx, member: discord.Member):
         """Добавить пользователя в whitelist (только для администраторов)"""
@@ -24,7 +24,7 @@ class Whitelist(commands.Cog):
         else:
             await ctx.send("❌ Ошибка при добавлении в whitelist")
 
-    @commands.command(name='alfa_whitelist_remove')
+    @commands.command(name='gb_whitelist_remove')
     @commands.has_permissions(administrator=True)
     async def whitelist_remove(self, ctx, member: discord.Member):
         """Удалить пользователя из whitelist (только для администраторов)"""
@@ -39,7 +39,7 @@ class Whitelist(commands.Cog):
         else:
             await ctx.send("❌ Ошибка при удалении из whitelist")
 
-    @commands.command(name='alfa_whitelist_list')
+    @commands.command(name='gb_whitelist_list')
     @commands.has_permissions(administrator=True)
     async def whitelist_list(self, ctx):
         """Показать список пользователей в whitelist (только для администраторов)"""

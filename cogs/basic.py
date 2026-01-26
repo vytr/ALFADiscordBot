@@ -12,7 +12,7 @@ class Basic(commands.Cog):
         self.bot = bot
         self.db = bot.db
 
-    @commands.command(name='alfa_ping')
+    @commands.command(name='gb_ping')
     @is_admin_or_whitelisted()
     async def ping(self, ctx):
         """Проверка задержки бота"""
@@ -21,7 +21,7 @@ class Basic(commands.Cog):
         latency = round(self.bot.latency * 1000)
         await ctx.send(f'🏓 Понг! Задержка: {latency}ms')
 
-    @commands.command(name='alfa_info')
+    @commands.command(name='gb_info')
     @is_admin_or_whitelisted()
     async def info(self, ctx):
         """Информация о боте"""
@@ -41,14 +41,14 @@ class Basic(commands.Cog):
 
         await ctx.send(embed=embed)
 
-    @commands.command(name='alfa_hello')
+    @commands.command(name='gb_hello')
     @is_admin_or_whitelisted()
     async def hello(self, ctx):
         """Поздороваться с ботом"""
         await ctx.message.delete()
         await ctx.send(f'Привет, {ctx.author.mention}! 👋')
 
-    @commands.command(name='alfa_say')
+    @commands.command(name='gb_say')
     @is_admin_or_whitelisted()
     async def say(self, ctx, *, message: str):
         print("say call")
@@ -56,7 +56,7 @@ class Basic(commands.Cog):
         await ctx.message.delete()
         await ctx.send(message)
 
-    @commands.command(name='alfa_duel')
+    @commands.command(name='gb_duel')
     async def duel(self,ctx, opponent: discord.Member):
         if opponent == ctx.author:
             await ctx.send("Вы не можете драться сами с собой!")

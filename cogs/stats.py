@@ -79,10 +79,10 @@ class Stats(commands.Cog):
             # Просто логируем переключение
             print(f"Voice channel switched: {member.name} {before.channel.name} -> {after.channel.name}")
 
-    @commands.command(name='alfa_stats')
+    @commands.command(name='gb_stats')
     @is_admin_or_whitelisted()
     async def stats(self, ctx, member: discord.Member = None, days: int = None):
-        """Показать статистику пользователя. Формат: !alfa_stats [@user] [7/14/30]"""
+        """Показать статистику пользователя. Формат: !gb_stats [@user] [7/14/30]"""
         await ctx.message.delete()
 
         # Если пользователь не указан - показываем статистику автора
@@ -149,10 +149,10 @@ class Stats(commands.Cog):
 
         await ctx.send(embed=embed)
 
-    @commands.command(name='alfa_stats_export')
+    @commands.command(name='gb_stats_export')
     @is_admin_or_whitelisted()
     async def stats_export(self, ctx, member: discord.Member = None, days: int = None):
-        """Экспортировать статистику в CSV. Формат: !alfa_stats_export [@user] [7/14/30]"""
+        """Экспортировать статистику в CSV. Формат: !gb_stats_export [@user] [7/14/30]"""
         await ctx.message.delete()
 
         # Если пользователь не указан - показываем статистику автора
@@ -206,10 +206,10 @@ class Stats(commands.Cog):
 
         await ctx.send(f"📊 Статистика {member.mention} экспортирована", file=file)
 
-    @commands.command(name='alfa_leaderboard')
+    @commands.command(name='gb_leaderboard')
     @is_admin_or_whitelisted()
     async def leaderboard(self, ctx, days: int = 7):
-        """Таблица лидеров. Формат: !alfa_leaderboard [7/14/30]"""
+        """Таблица лидеров. Формат: !gb_leaderboard [7/14/30]"""
         await ctx.message.delete()
 
         if days not in [7, 14, 30]:
@@ -270,10 +270,10 @@ class Stats(commands.Cog):
         await ctx.send(embed=embed_messages)
         await ctx.send(embed=embed_voice)
 
-    @commands.command(name='alfa_inactive')
+    @commands.command(name='gb_inactive')
     @is_admin_or_whitelisted()
     async def inactive(self, ctx, days: int = 7, role: discord.Role = None):
-        """Показать неактивных участников. Формат: !alfa_inactive [7/14/30] [@роль]"""
+        """Показать неактивных участников. Формат: !gb_inactive [7/14/30] [@роль]"""
         await ctx.message.delete()
 
         if days not in [7, 14, 30]:
@@ -330,10 +330,10 @@ class Stats(commands.Cog):
 
         await ctx.send(embed=embed)
 
-    @commands.command(name='alfa_summary')
+    @commands.command(name='gb_summary')
     @is_admin_or_whitelisted()
     async def summary(self, ctx, days: int = 7, role: discord.Role = None):
-        """Сводка активности сервера. Формат: !alfa_summary [7/14/30] [@роль]"""
+        """Сводка активности сервера. Формат: !gb_summary [7/14/30] [@роль]"""
         await ctx.message.delete()
         
         if days not in [7, 14, 30]:
@@ -439,14 +439,14 @@ class Stats(commands.Cog):
                     inline=False
                 )
         
-        embed.set_footer(text=f"Используйте !alfa_inactive {days} для списка неактивных")
+        embed.set_footer(text=f"Используйте !gb_inactive {days} для списка неактивных")
         
         await ctx.send(embed=embed)
 
-    @commands.command(name='alfa_export')
+    @commands.command(name='gb_export')
     @is_admin_or_whitelisted()
     async def export_stats(self, ctx, days: int = 7, role: discord.Role = None):
-        """Экспортировать полную статистику в CSV. Формат: !alfa_export [7/14/30] [@роль]"""
+        """Экспортировать полную статистику в CSV. Формат: !gb_export [7/14/30] [@роль]"""
         await ctx.message.delete()
 
         if days not in [7, 14, 30]:
@@ -545,7 +545,7 @@ class Stats(commands.Cog):
             file=file
         )
 
-    @commands.command(name='alfa_voice_debug')
+    @commands.command(name='gb_voice_debug')
     @commands.has_permissions(administrator=True)
     async def voice_debug(self, ctx):
         """[ADMIN] Показать активные голосовые сессии для отладки"""

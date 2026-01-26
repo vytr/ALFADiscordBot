@@ -747,13 +747,13 @@ class StatsView(discord.ui.View):
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Возвращаемся к главной панели
         embed = discord.Embed(
-            title="🎛️ ALFA Bot Control Panel",
+            title="🎛️ GuildBrew Control Panel",
             description="Добро пожаловать в панель управления!\nВыберите нужный раздел, нажав на кнопку ниже.",
             color=0x2ECC71,
             timestamp=datetime.utcnow()
         )
         embed.set_thumbnail(url=self.bot.user.avatar.url if self.bot.user.avatar else None)
-        embed.set_footer(text="ALFA Bot • Панель управления", icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None)
+        embed.set_footer(text="GuildBrew • Панель управления", icon_url=self.bot.user.avatar.url if self.bot.user.avatar else None)
 
         await interaction.response.edit_message(embed=embed, view=PanelView(self.bot))
 
@@ -1003,7 +1003,7 @@ class WhitelistView(discord.ui.View):
     @discord.ui.button(label="🔙 Назад", style=discord.ButtonStyle.gray, custom_id="back_to_main_from_whitelist", row=1)
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = discord.Embed(
-            title="🎛️ ALFA Bot Control Panel",
+            title="🎛️ GuildBrew Control Panel",
             description="Добро пожаловать в панель управления!\nВыберите нужный раздел, нажав на кнопку ниже.",
             color=0x5865F2,
             timestamp=datetime.utcnow()
@@ -1764,7 +1764,7 @@ class WarningsView(discord.ui.View):
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Возвращаемся к главной панели
         embed = discord.Embed(
-            title="🎛️ ALFA Bot Control Panel",
+            title="🎛️ GuildBrew Control Panel",
             description="Добро пожаловать в панель управления!\nВыберите нужный раздел, нажав на кнопку ниже.",
             color=0x5865F2,
             timestamp=datetime.utcnow()
@@ -2303,7 +2303,7 @@ class Panel(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @discord.app_commands.command(name="panel", description="🎛️ Панель управления ALFA Bot")
+    @discord.app_commands.command(name="panel", description="🎛️ Панель управления GuildBrew")
     async def panel(self, interaction: discord.Interaction):
         # Проверка прав: администратор или в whitelist
         if not interaction.user.guild_permissions.administrator:
@@ -2316,7 +2316,7 @@ class Panel(commands.Cog):
                 return
         
         embed = discord.Embed(
-            title="🎛️ ALFA Bot Control Panel",
+            title="🎛️ GuildBrew Control Panel",
             description="Добро пожаловать в панель управления!\nВыберите нужный раздел, нажав на кнопку ниже.",
             color=0x5865F2,
             timestamp=datetime.utcnow()

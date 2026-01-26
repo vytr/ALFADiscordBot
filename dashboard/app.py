@@ -15,7 +15,7 @@ DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
 DISCORD_REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI", "http://localhost:8501")
 BOT_API_URL = "http://localhost:5555/api"
 
-st.set_page_config(page_title="ALFA Bot Dashboard", page_icon="📊", layout="wide")
+st.set_page_config(page_title="GuildBrew Dashboard", page_icon="📊", layout="wide")
 
 # ==================== DISCORD OAUTH ====================
 
@@ -101,7 +101,7 @@ if 'code' in query_params and st.session_state.user is None:
 # ==================== СТРАНИЦА ЛОГИНА ====================
 
 if st.session_state.user is None:
-    st.title("🔐 ALFA Bot Dashboard")
+    st.title("🔐 GuildBrew Dashboard")
     st.markdown("### Для доступа необходима авторизация через Discord")
     
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -222,7 +222,7 @@ def make_discord_link(user_id, members_cache):
 
 # ==================== HEADER ====================
 
-st.title("📊 ALFA Bot Dashboard")
+st.title("📊 GuildBrew Dashboard")
 
 # ==================== ВЫБОР СЕРВЕРА ====================
 
@@ -582,4 +582,4 @@ with tab4:
         st.plotly_chart(fig3, use_container_width=True)
 
 st.markdown("---")
-st.markdown("**ALFA Bot Dashboard** • Обновляется каждую минуту")
+st.markdown("**GuildBrew Dashboard** • Обновляется каждую минуту")

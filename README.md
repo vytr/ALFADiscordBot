@@ -1,4 +1,4 @@
-# ALFA Discord Bot
+# GuildBrew Discord Bot
 
 Многофункциональный Discord бот на Python с системой статистики, опросов, выговоров и модерации.
 
@@ -125,11 +125,11 @@ python bot.py
 - ПКМ на опросе → "Копировать ID сообщения" (требует Developer Mode)
 
 ### Статистика
-- `!alfa_stats [@user] [7/14/30]` - Статистика пользователя
-- `!alfa_leaderboard [7/14/30]` - Топ активных
-- `!alfa_inactive [7/14/30] [@роль]` - Неактивные участники
-- `!alfa_summary [7/14/30] [@роль]` - Сводка активности
-- `!alfa_export [7/14/30] [@роль]` - Экспорт в CSV
+- `!gb_stats [@user] [7/14/30]` - Статистика пользователя
+- `!gb_leaderboard [7/14/30]` - Топ активных
+- `!gb_inactive [7/14/30] [@роль]` - Неактивные участники
+- `!gb_summary [7/14/30] [@роль]` - Сводка активности
+- `!gb_export [7/14/30] [@роль]` - Экспорт в CSV
 
 ### Выговоры
 - `!warn @user причина` - Выдать выговор
@@ -139,9 +139,9 @@ python bot.py
 - `!warnings_active` - Статистика активных выговоров
 
 ### Whitelist (только для админов)
-- `!alfa_whitelist_add @user` - Добавить в whitelist
-- `!alfa_whitelist_remove @user` - Удалить из whitelist
-- `!alfa_whitelist_list` - Список whitelist
+- `!gb_whitelist_add @user` - Добавить в whitelist
+- `!gb_whitelist_remove @user` - Удалить из whitelist
+- `!gb_whitelist_list` - Список whitelist
 
 ### Игры
 - `!drink` - Выпить (раз в час)
