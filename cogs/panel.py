@@ -2382,7 +2382,13 @@ class Panel(commands.Cog):
         )
         
         # Используем кастомный footer или дефолтный с именем пользователя
-        logo_url = settings.get('logo_url') or (interaction.user.avatar.url if interaction.user.avatar else None)
+        # Локальные пути (/uploads/...) не работают в Discord embeds - нужен полный URL
+        logo_url = settings.get('logo_url')
+        if logo_url and logo_url.startswith('/'):
+            # Локальный путь - используем аватар пользователя вместо этого
+            logo_url = interaction.user.avatar.url if interaction.user.avatar else None
+        elif not logo_url:
+            logo_url = interaction.user.avatar.url if interaction.user.avatar else None
         embed.set_footer(text=settings['footer_text'], icon_url=logo_url)
 
         await interaction.response.send_message(embed=embed, view=PanelView(self.bot, interaction.guild.id), ephemeral=True)
