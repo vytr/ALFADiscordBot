@@ -504,6 +504,167 @@ class APIServer(commands.Cog):
             """Отдаём файл логотипа"""
             return send_from_directory(UPLOAD_FOLDER, filename)
 
+        @self.flask_app.route('/api/admin/guild/<int:guild_id>/bot-avatar', methods=['POST'])
+        def apply_bot_avatar(guild_id):
+            """Применить загруженный логотип как серверную аватарку бота"""
+            if not self.bot.is_ready():
+                return jsonify({'error': 'Bot not ready'}), 503
+
+            access_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+            if not access_token:
+                return jsonify({'error': 'Authorization header required'}), 401
+
+            # Проверяем whitelist
+            user_id = get_user_id_from_token(access_token)
+            if not user_id or not self.bot.db.is_whitelisted(guild_id, user_id):
+                return jsonify({'error': 'Access denied'}), 403
+
+            # Проверяем что гильдия существует
+            guild = self.bot.get_guild(guild_id)
+            if not guild:
+                return jsonify({'error': 'Guild not found'}), 404
+
+            # Получаем текущий логотип из настроек
+            settings = self.bot.db.get_guild_settings(guild_id)
+            logo_url = settings.get('logo_url')
+
+            if not logo_url:
+                return jsonify({'error': 'No logo uploaded. Please upload a logo first.'}), 400
+
+            try:
+                import base64
+                import asyncio
+
+                # Определяем путь к файлу логотипа
+                if logo_url.startswith('/uploads/logos/'):
+                    filename = logo_url.split('/')[-1]
+                    filepath = os.path.join(UPLOAD_FOLDER, filename)
+
+                    if not os.path.exists(filepath):
+                        return jsonify({'error': 'Logo file not found'}), 404
+
+                    # Читаем файл и конвертируем в base64
+                    with open(filepath, 'rb') as f:
+                        image_data = f.read()
+                else:
+                    # Внешний URL - скачиваем изображение
+                    try:
+                        response = requests.get(logo_url, timeout=10)
+                        if response.status_code != 200:
+                            return jsonify({'error': 'Failed to fetch logo from URL'}), 400
+                        image_data = response.content
+                    except Exception as e:
+                        return jsonify({'error': f'Failed to fetch logo: {str(e)}'}), 400
+
+                # Определяем MIME тип
+                import imghdr
+                image_type = imghdr.what(None, h=image_data)
+                if image_type not in ['png', 'jpeg', 'gif', 'webp']:
+                    # Попробуем определить по расширению
+                    if logo_url.lower().endswith('.jpg') or logo_url.lower().endswith('.jpeg'):
+                        image_type = 'jpeg'
+                    elif logo_url.lower().endswith('.png'):
+                        image_type = 'png'
+                    elif logo_url.lower().endswith('.gif'):
+                        image_type = 'gif'
+                    elif logo_url.lower().endswith('.webp'):
+                        image_type = 'webp'
+                    else:
+                        image_type = 'png'  # default
+
+                mime_type = f"image/{image_type}"
+                if image_type == 'jpeg':
+                    mime_type = 'image/jpeg'
+
+                # Формируем data URI для Discord API
+                base64_image = base64.b64encode(image_data).decode('utf-8')
+                avatar_data = f"data:{mime_type};base64,{base64_image}"
+
+                # Используем Discord API для установки серверной аватарки бота
+                # PATCH /guilds/{guild.id}/members/@me
+                bot_token = os.getenv('DISCORD_BOT_TOKEN')
+                if not bot_token:
+                    return jsonify({'error': 'Bot token not configured'}), 500
+
+                headers = {
+                    'Authorization': f'Bot {bot_token}',
+                    'Content-Type': 'application/json'
+                }
+
+                api_response = requests.patch(
+                    f'https://discord.com/api/v10/guilds/{guild_id}/members/@me',
+                    headers=headers,
+                    json={'avatar': avatar_data},
+                    timeout=30
+                )
+
+                if api_response.status_code == 200:
+                    return jsonify({
+                        'success': True,
+                        'message': 'Bot avatar updated successfully for this server'
+                    })
+                elif api_response.status_code == 400:
+                    error_data = api_response.json()
+                    return jsonify({'error': f"Discord API error: {error_data.get('message', 'Bad request')}"}), 400
+                elif api_response.status_code == 403:
+                    return jsonify({'error': 'Bot does not have permission to change avatar on this server'}), 403
+                elif api_response.status_code == 429:
+                    return jsonify({'error': 'Rate limited. Please try again later.'}), 429
+                else:
+                    return jsonify({'error': f'Discord API returned status {api_response.status_code}'}), 500
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        @self.flask_app.route('/api/admin/guild/<int:guild_id>/bot-avatar', methods=['DELETE'])
+        def reset_bot_avatar(guild_id):
+            """Сбросить серверную аватарку бота (использовать глобальную)"""
+            if not self.bot.is_ready():
+                return jsonify({'error': 'Bot not ready'}), 503
+
+            access_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+            if not access_token:
+                return jsonify({'error': 'Authorization header required'}), 401
+
+            # Проверяем whitelist
+            user_id = get_user_id_from_token(access_token)
+            if not user_id or not self.bot.db.is_whitelisted(guild_id, user_id):
+                return jsonify({'error': 'Access denied'}), 403
+
+            # Проверяем что гильдия существует
+            guild = self.bot.get_guild(guild_id)
+            if not guild:
+                return jsonify({'error': 'Guild not found'}), 404
+
+            try:
+                bot_token = os.getenv('DISCORD_BOT_TOKEN')
+                if not bot_token:
+                    return jsonify({'error': 'Bot token not configured'}), 500
+
+                headers = {
+                    'Authorization': f'Bot {bot_token}',
+                    'Content-Type': 'application/json'
+                }
+
+                # Отправляем null чтобы сбросить к глобальной аватарке
+                api_response = requests.patch(
+                    f'https://discord.com/api/v10/guilds/{guild_id}/members/@me',
+                    headers=headers,
+                    json={'avatar': None},
+                    timeout=30
+                )
+
+                if api_response.status_code == 200:
+                    return jsonify({
+                        'success': True,
+                        'message': 'Bot avatar reset to default for this server'
+                    })
+                else:
+                    return jsonify({'error': f'Discord API returned status {api_response.status_code}'}), 500
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
     def run_flask(self):
         """Запуск Flask сервера"""
         self.flask_app.run(host='0.0.0.0', port=5555, debug=False, use_reloader=False)

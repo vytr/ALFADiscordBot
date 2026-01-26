@@ -148,6 +148,34 @@ def delete_logo(guild_id, access_token):
         return False
 
 
+def apply_bot_avatar(guild_id, access_token):
+    """Применяет загруженный логотип как серверную аватарку бота"""
+    try:
+        headers = {'Authorization': f'Bearer {access_token}'}
+        response = requests.post(
+            f"{BOT_API_URL}/admin/guild/{guild_id}/bot-avatar",
+            headers=headers,
+            timeout=30
+        )
+        return response.json()
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def reset_bot_avatar(guild_id, access_token):
+    """Сбрасывает серверную аватарку бота к глобальной"""
+    try:
+        headers = {'Authorization': f'Bearer {access_token}'}
+        response = requests.delete(
+            f"{BOT_API_URL}/admin/guild/{guild_id}/bot-avatar",
+            headers=headers,
+            timeout=30
+        )
+        return response.json()
+    except Exception as e:
+        return {'error': str(e)}
+
+
 # ==================== ИНИЦИАЛИЗАЦИЯ SESSION STATE ====================
 
 if 'user' not in st.session_state:
@@ -377,6 +405,34 @@ with tab1:
             value='' if current_logo and current_logo.startswith('/') else (current_logo or ''),
             help="Внешняя ссылка на изображение"
         )
+
+        # Секция для серверной аватарки бота
+        st.markdown("---")
+        st.markdown("**Аватарка бота на сервере**")
+        st.caption("Установить загруженный логотип как аватарку бота на этом сервере")
+
+        col_avatar1, col_avatar2 = st.columns(2)
+
+        with col_avatar1:
+            if st.button("🤖 Применить как аватарку бота", key="apply_bot_avatar", use_container_width=True):
+                if not current_logo:
+                    st.error("Сначала загрузите логотип")
+                else:
+                    with st.spinner("Применяем аватарку..."):
+                        result = apply_bot_avatar(guild_id, st.session_state.access_token)
+                        if 'error' in result:
+                            st.error(f"Ошибка: {result['error']}")
+                        else:
+                            st.success("Аватарка бота обновлена на этом сервере!")
+
+        with col_avatar2:
+            if st.button("↩️ Сбросить аватарку", key="reset_bot_avatar", use_container_width=True):
+                with st.spinner("Сбрасываем аватарку..."):
+                    result = reset_bot_avatar(guild_id, st.session_state.access_token)
+                    if 'error' in result:
+                        st.error(f"Ошибка: {result['error']}")
+                    else:
+                        st.success("Аватарка бота сброшена к глобальной!")
 
 # ==================== ТАБ 2: ТЕКСТЫ ====================
 
