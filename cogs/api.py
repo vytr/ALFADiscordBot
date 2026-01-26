@@ -412,7 +412,7 @@ class APIServer(commands.Cog):
 
     def run_flask(self):
         """Запуск Flask сервера"""
-        self.flask_app.run(host='127.0.0.1', port=5555, debug=False, use_reloader=False)
+        self.flask_app.run(host='0.0.0.0', port=5555, debug=False, use_reloader=False)
 
 
 async def setup(bot):
