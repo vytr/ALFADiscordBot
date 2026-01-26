@@ -493,19 +493,27 @@ with col1:
         save_success = True
         avatar_applied = False
 
-        # 1. Если есть загруженный файл - сначала загружаем его
+        # 1. Если есть загруженный файл - загружаем и сразу применяем как аватарку
         if uploaded_file and uploaded_file.size <= 10 * 1024 * 1024:
             with st.spinner("Загружаем аватарку..."):
                 result = upload_logo(guild_id, st.session_state.access_token, uploaded_file)
                 if 'error' in result:
                     st.error(f"Ошибка загрузки аватарки: {result['error']}")
                     save_success = False
+                else:
+                    # Сразу применяем как аватарку бота (logo_url уже в БД)
+                    with st.spinner("Применяем аватарку бота..."):
+                        avatar_result = apply_bot_avatar(guild_id, st.session_state.access_token)
+                        if 'error' not in avatar_result:
+                            avatar_applied = True
+                        else:
+                            st.warning(f"Аватарка загружена, но не применена: {avatar_result['error']}")
 
-        # 2. Определяем logo_url
+        # 2. Определяем logo_url для настроек
         current_logo = settings.get('logo_url')
         final_logo_url = logo_url if logo_url else (current_logo if current_logo and current_logo.startswith('/') else None)
 
-        # 3. Сохраняем настройки
+        # 3. Сохраняем остальные настройки
         if save_success:
             new_settings = {
                 'bot_name': bot_name,
@@ -518,8 +526,8 @@ with col1:
             }
 
             if update_guild_settings(guild_id, st.session_state.access_token, new_settings):
-                # 4. Применяем аватарку бота если есть логотип
-                if uploaded_file or final_logo_url:
+                # Если указан внешний URL (не файл) - тоже применяем
+                if logo_url and not uploaded_file:
                     with st.spinner("Применяем аватарку бота..."):
                         avatar_result = apply_bot_avatar(guild_id, st.session_state.access_token)
                         if 'error' not in avatar_result:
