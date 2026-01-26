@@ -114,6 +114,40 @@ def reset_guild_settings(guild_id, access_token):
         return False
 
 
+def upload_logo(guild_id, access_token, file):
+    """Загружает логотип для сервера"""
+    try:
+        headers = {'Authorization': f'Bearer {access_token}'}
+        files = {'file': (file.name, file.getvalue(), file.type)}
+        response = requests.post(
+            f"{BOT_API_URL}/admin/guild/{guild_id}/logo",
+            headers=headers,
+            files=files,
+            timeout=30
+        )
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {'error': response.json().get('error', 'Upload failed')}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def delete_logo(guild_id, access_token):
+    """Удаляет логотип сервера"""
+    try:
+        headers = {'Authorization': f'Bearer {access_token}'}
+        response = requests.delete(
+            f"{BOT_API_URL}/admin/guild/{guild_id}/logo",
+            headers=headers,
+            timeout=10
+        )
+        return response.status_code == 200
+    except Exception as e:
+        st.error(f"Ошибка удаления логотипа: {e}")
+        return False
+
+
 # ==================== ИНИЦИАЛИЗАЦИЯ SESSION STATE ====================
 
 if 'user' not in st.session_state:
@@ -291,18 +325,58 @@ with tab1:
         )
 
     with col2:
-        logo_url = st.text_input(
-            "URL логотипа",
-            value=settings.get('logo_url') or '',
-            help="Ссылка на изображение логотипа (PNG/JPG)"
-        )
+        st.markdown("**Логотип**")
 
-        if logo_url:
-            st.markdown("**Превью логотипа:**")
+        current_logo = settings.get('logo_url')
+
+        # Показываем текущий логотип если есть
+        if current_logo:
+            st.markdown("Текущий логотип:")
+            # Формируем полный URL для отображения
+            if current_logo.startswith('/'):
+                display_url = f"{BOT_API_URL.rsplit('/api', 1)[0]}{current_logo}"
+            else:
+                display_url = current_logo
             try:
-                st.image(logo_url, width=128)
+                st.image(display_url, width=128)
             except:
                 st.warning("Не удалось загрузить изображение")
+
+            # Кнопка удаления
+            if st.button("🗑️ Удалить логотип", key="delete_logo"):
+                if delete_logo(guild_id, st.session_state.access_token):
+                    st.success("Логотип удалён")
+                    st.rerun()
+                else:
+                    st.error("Ошибка удаления логотипа")
+
+        # Загрузка нового логотипа
+        uploaded_file = st.file_uploader(
+            "Загрузить новый логотип",
+            type=['png', 'jpg', 'jpeg', 'gif', 'webp'],
+            help="Максимум 10 МБ. Форматы: PNG, JPG, GIF, WebP"
+        )
+
+        if uploaded_file:
+            # Проверяем размер
+            if uploaded_file.size > 10 * 1024 * 1024:
+                st.error("Файл слишком большой. Максимум 10 МБ")
+            else:
+                st.image(uploaded_file, width=128, caption="Превью")
+                if st.button("📤 Загрузить", key="upload_logo"):
+                    result = upload_logo(guild_id, st.session_state.access_token, uploaded_file)
+                    if 'error' in result:
+                        st.error(f"Ошибка: {result['error']}")
+                    else:
+                        st.success("Логотип загружен!")
+                        st.rerun()
+
+        # Или URL вручную
+        logo_url = st.text_input(
+            "Или укажите URL логотипа",
+            value='' if current_logo and current_logo.startswith('/') else (current_logo or ''),
+            help="Внешняя ссылка на изображение"
+        )
 
 # ==================== ТАБ 2: ТЕКСТЫ ====================
 
@@ -389,13 +463,18 @@ col1, col2, col3 = st.columns([2, 1, 1])
 
 with col1:
     if st.button("💾 Сохранить настройки", type="primary", use_container_width=True):
+        # Определяем logo_url: если введён URL вручную — используем его,
+        # иначе сохраняем текущий (загруженный файл)
+        current_logo = settings.get('logo_url')
+        final_logo_url = logo_url if logo_url else (current_logo if current_logo and current_logo.startswith('/') else None)
+
         new_settings = {
             'bot_name': bot_name,
             'primary_color': primary_color,
             'secondary_color': secondary_color,
             'panel_title': panel_title,
             'welcome_message': welcome_message,
-            'logo_url': logo_url if logo_url else None,
+            'logo_url': final_logo_url,
             'footer_text': footer_text
         }
 

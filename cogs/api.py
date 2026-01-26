@@ -1,7 +1,14 @@
 from discord.ext import commands
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 import threading
 import requests
+import os
+from werkzeug.utils import secure_filename
+
+# Папка для загрузки логотипов
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads', 'logos')
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 class APIServer(commands.Cog):
     """Flask API для dashboard"""
@@ -396,6 +403,106 @@ class APIServer(commands.Cog):
                     return jsonify({'error': 'Failed to reset settings'}), 500
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
+
+        # ==================== LOGO UPLOAD ====================
+
+        def allowed_file(filename):
+            return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+        @self.flask_app.route('/api/admin/guild/<int:guild_id>/logo', methods=['POST'])
+        def upload_logo(guild_id):
+            """Загрузить логотип для сервера"""
+            if not self.bot.is_ready():
+                return jsonify({'error': 'Bot not ready'}), 503
+
+            access_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+            if not access_token:
+                return jsonify({'error': 'Authorization header required'}), 401
+
+            # Проверяем whitelist
+            user_id = get_user_id_from_token(access_token)
+            if not user_id or not self.bot.db.is_whitelisted(guild_id, user_id):
+                return jsonify({'error': 'Access denied'}), 403
+
+            if 'file' not in request.files:
+                return jsonify({'error': 'No file provided'}), 400
+
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({'error': 'No file selected'}), 400
+
+            if not allowed_file(file.filename):
+                return jsonify({'error': 'Invalid file type. Allowed: png, jpg, jpeg, gif, webp'}), 400
+
+            # Проверяем размер файла
+            file.seek(0, 2)
+            file_size = file.tell()
+            file.seek(0)
+
+            if file_size > MAX_FILE_SIZE:
+                return jsonify({'error': 'File too large. Maximum size: 10 MB'}), 400
+
+            try:
+                # Создаём папку если не существует
+                os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+                # Удаляем старый логотип если есть
+                for old_file in os.listdir(UPLOAD_FOLDER):
+                    if old_file.startswith(f"{guild_id}."):
+                        os.remove(os.path.join(UPLOAD_FOLDER, old_file))
+
+                # Сохраняем новый файл
+                ext = file.filename.rsplit('.', 1)[1].lower()
+                filename = f"{guild_id}.{ext}"
+                filepath = os.path.join(UPLOAD_FOLDER, filename)
+                file.save(filepath)
+
+                # Формируем URL для логотипа
+                logo_url = f"/uploads/logos/{filename}"
+
+                # Обновляем настройки в БД
+                self.bot.db.update_guild_settings(guild_id, logo_url=logo_url)
+
+                return jsonify({
+                    'success': True,
+                    'logo_url': logo_url,
+                    'message': 'Logo uploaded successfully'
+                })
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        @self.flask_app.route('/api/admin/guild/<int:guild_id>/logo', methods=['DELETE'])
+        def delete_logo(guild_id):
+            """Удалить логотип сервера"""
+            if not self.bot.is_ready():
+                return jsonify({'error': 'Bot not ready'}), 503
+
+            access_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+            if not access_token:
+                return jsonify({'error': 'Authorization header required'}), 401
+
+            # Проверяем whitelist
+            user_id = get_user_id_from_token(access_token)
+            if not user_id or not self.bot.db.is_whitelisted(guild_id, user_id):
+                return jsonify({'error': 'Access denied'}), 403
+
+            try:
+                # Удаляем файл
+                for old_file in os.listdir(UPLOAD_FOLDER):
+                    if old_file.startswith(f"{guild_id}."):
+                        os.remove(os.path.join(UPLOAD_FOLDER, old_file))
+
+                # Очищаем URL в БД
+                self.bot.db.update_guild_settings(guild_id, logo_url=None)
+
+                return jsonify({'success': True, 'message': 'Logo deleted'})
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        @self.flask_app.route('/uploads/logos/<filename>')
+        def serve_logo(filename):
+            """Отдаём файл логотипа"""
+            return send_from_directory(UPLOAD_FOLDER, filename)
 
     def run_flask(self):
         """Запуск Flask сервера"""
