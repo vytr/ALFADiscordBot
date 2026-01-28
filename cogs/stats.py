@@ -18,13 +18,15 @@ class Stats(commands.Cog):
         self.cleanup_task.cancel()
 
     async def setup_hook(self):
-        """Вызывается при загрузке cog - закрываем зависшие сессии и восстанавливаем активные"""
+        """Вызывается при загрузке cog - закрываем зависшие сессии"""
         print("🔧 Closing hanging voice sessions...")
         closed = self.db.close_hanging_voice_sessions(max_duration_hours=24)
         if closed > 0:
             print(f"✅ Closed {closed} hanging voice sessions")
 
-        # Восстанавливаем сессии для пользователей, которые уже в голосовых каналах
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """Восстанавливаем голосовые сессии для пользователей уже в войсе"""
         print("🔄 Recovering voice sessions for users already in voice channels...")
         recovered = 0
         for guild in self.bot.guilds:
