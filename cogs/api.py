@@ -797,8 +797,45 @@ class APIServer(commands.Cog):
                 return jsonify({'error': str(e)}), 500
 
     def run_flask(self):
-        """Запуск Flask сервера"""
-        self.flask_app.run(host='0.0.0.0', port=5555, debug=False, use_reloader=False)
+        """Запуск Flask сервера через Gunicorn"""
+        from gunicorn.app.base import BaseApplication
+        
+        class StandaloneApplication(BaseApplication):
+            def __init__(self, app, options=None):
+                self.options = options or {}
+                self.application = app
+                super().__init__()
+            
+            def load_config(self):
+                # Применяем конфигурацию
+                config = {key: value for key, value in self.options.items()
+                        if key in self.cfg.settings and value is not None}
+                for key, value in config.items():
+                    self.cfg.set(key.lower(), value)
+            
+            def load(self):
+                return self.application
+        
+        options = {
+            'bind': '0.0.0.0:5555',
+            'workers': 2,
+            'threads': 4,
+            'worker_class': 'gthread',
+            'timeout': 120,
+            'keepalive': 5,
+            'max_requests': 1000,
+            'max_requests_jitter': 100,
+            'preload_app': False,
+            'accesslog': '-',
+            'errorlog': '-',
+            'loglevel': 'info',
+        }
+        
+        print("🚀 Starting Gunicorn API server...")
+        print(f"   Workers: {options['workers']} x Threads: {options['threads']} = {options['workers'] * options['threads']} concurrent requests")
+        print(f"   Listening on http://0.0.0.0:{5555}")
+        
+        StandaloneApplication(self.flask_app, options).run()
 
 
 async def setup(bot):
