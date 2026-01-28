@@ -18,11 +18,27 @@ class Stats(commands.Cog):
         self.cleanup_task.cancel()
 
     async def setup_hook(self):
-        """Вызывается при загрузке cog - закрываем зависшие сессии"""
+        """Вызывается при загрузке cog - закрываем зависшие сессии и восстанавливаем активные"""
         print("🔧 Closing hanging voice sessions...")
         closed = self.db.close_hanging_voice_sessions(max_duration_hours=24)
         if closed > 0:
             print(f"✅ Closed {closed} hanging voice sessions")
+
+        # Восстанавливаем сессии для пользователей, которые уже в голосовых каналах
+        print("🔄 Recovering voice sessions for users already in voice channels...")
+        recovered = 0
+        for guild in self.bot.guilds:
+            for voice_channel in guild.voice_channels:
+                for member in voice_channel.members:
+                    if not member.bot:
+                        self.db.start_voice_session(guild.id, member.id)
+                        recovered += 1
+                        print(f"  ↳ Recovered session: {member.name} in {voice_channel.name} ({guild.name})")
+
+        if recovered > 0:
+            print(f"✅ Recovered {recovered} voice sessions")
+        else:
+            print("ℹ️ No users in voice channels to recover")
 
     @tasks.loop(hours=24)
     async def cleanup_task(self):
