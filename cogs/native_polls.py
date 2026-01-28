@@ -44,7 +44,7 @@ class NativePollSystem(commands.Cog):
                     guild_id=payload.guild_id if payload.guild_id else 0,
                     channel_id=payload.channel_id,
                     question=poll.question,
-                    options=options
+                    answers=options
                 )
                 print(f"📊 New poll discovered: {payload.message_id} - {poll.question[:50]}")
                 print(f"   Options: {options}")
