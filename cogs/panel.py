@@ -891,7 +891,7 @@ class PanelView(discord.ui.View):
         
         await interaction.response.edit_message(embed=embed, view=WhitelistView(self.bot))
     
-    @discord.ui.button(label="⚠️ Warnings", style=discord.ButtonStyle.red, custom_id="warnings_panel", row=1)  # ← НОВАЯ КНОПКА!
+    @discord.ui.button(label="⚠️ Warnings", style=discord.ButtonStyle.red, custom_id="warnings_panel", row=0)
     async def warnings(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Проверка прав: администратор или в whitelist
         if not interaction.user.guild_permissions.administrator:
@@ -2370,13 +2370,7 @@ class Panel(commands.Cog):
         )
         
         embed.add_field(
-            name="📊 Polls",
-            value="Создание и управление опросами",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="⚠️ Warnings",  # ← НОВОЕ!
+            name="⚠️ Warnings",
             value="Система выговоров и модерация",
             inline=True
         )
