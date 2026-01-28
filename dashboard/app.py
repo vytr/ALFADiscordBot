@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from urllib.parse import urlencode
 import os
 from dotenv import load_dotenv
+from datetime import datetime, date
 
 load_dotenv()
 
@@ -192,14 +193,6 @@ def get_guild_members(guild_id):
         return {}
 
 @st.cache_data(ttl=60)
-def get_guild_stats(guild_id, days):
-    try:
-        response = requests.get(f"{BOT_API_URL}/guild/{guild_id}/stats/{days}", timeout=5)
-        return response.json()
-    except:
-        return []
-
-@st.cache_data(ttl=60)
 def get_inactive_users(guild_id, days, activity_type='both'):
     try:
         response = requests.get(f"{BOT_API_URL}/guild/{guild_id}/inactive/{days}/{activity_type}", timeout=5)
@@ -222,6 +215,52 @@ def get_guild_roles(guild_id):
         return response.json()
     except:
         return []
+
+
+def get_users_stats(guild_id, include_roles=None, exclude_roles=None, since_date=None, sort_by='voice'):
+    """Получает статистику всех пользователей с фильтрами"""
+    try:
+        params = {}
+        if include_roles:
+            for role_id in include_roles:
+                params.setdefault('include_roles', []).append(role_id)
+        if exclude_roles:
+            for role_id in exclude_roles:
+                params.setdefault('exclude_roles', []).append(role_id)
+        if since_date:
+            params['since_date'] = since_date.strftime('%Y-%m-%d')
+        if sort_by:
+            params['sort_by'] = sort_by
+
+        # Build URL with repeated params for lists
+        url = f"{BOT_API_URL}/guild/{guild_id}/users-stats"
+        if params:
+            param_parts = []
+            for key, value in params.items():
+                if isinstance(value, list):
+                    for v in value:
+                        param_parts.append(f"{key}={v}")
+                else:
+                    param_parts.append(f"{key}={value}")
+            url += "?" + "&".join(param_parts)
+
+        response = requests.get(url, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        return {'users': [], 'total_count': 0}
+    except:
+        return {'users': [], 'total_count': 0}
+
+
+def format_voice_time(seconds):
+    """Форматирует время в войсе в читаемый формат"""
+    if not seconds or seconds == 0:
+        return "0м"
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    if hours > 0:
+        return f"{hours}ч {minutes}м"
+    return f"{minutes}м"
 
 def make_discord_link(user_id, members_cache):
     member = members_cache.get(user_id)
@@ -278,67 +317,156 @@ if st.sidebar.button("🚪 Выйти", use_container_width=True, type="primary"
 
 # ==================== ТАБЫ ====================
 
-tab1, tab2, tab3, tab4 = st.tabs(["📈 Статистика", "😴 Неактивные", "⚠️ Выговоры", "📊 Графики"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Пользователи", "😴 Неактивные", "⚠️ Выговоры", "📈 Графики"])
 
-# ==================== ТАБ 1: СТАТИСТИКА ====================
+# ==================== ТАБ 1: ПОЛЬЗОВАТЕЛИ ====================
 with tab1:
-    st.header("📈 Статистика активности")
-    
-    col1, col2 = st.columns([1, 3])
-    
-    with col1:
-        days = st.selectbox("📅 Период", [7, 14, 30], index=0, key="stats_days")
-    
-    stats = get_guild_stats(guild_id, days)
-    
-    if not stats:
-        st.warning("Нет данных за выбранный период")
-    else:
-        df = pd.DataFrame(stats)
-        
-        # Метрики
+    st.header("📊 Статистика пользователей")
+
+    # Получаем роли сервера для фильтров
+    roles = get_guild_roles(guild_id)
+    role_options = {r['id']: r['name'] for r in roles}
+
+    # Фильтры в колонках
+    st.subheader("🔍 Фильтры")
+    filter_col1, filter_col2, filter_col3 = st.columns(3)
+
+    with filter_col1:
+        include_roles = st.multiselect(
+            "✅ Включить с ролью",
+            options=list(role_options.keys()),
+            format_func=lambda x: role_options.get(x, str(x)),
+            help="Показать только пользователей с выбранными ролями (любая из)",
+            key="stats_include_roles"
+        )
+
+    with filter_col2:
+        exclude_roles = st.multiselect(
+            "❌ Исключить с ролью",
+            options=list(role_options.keys()),
+            format_func=lambda x: role_options.get(x, str(x)),
+            help="Скрыть пользователей с выбранными ролями",
+            key="stats_exclude_roles"
+        )
+
+    with filter_col3:
+        since_date = st.date_input(
+            "📅 Показать активность с",
+            value=None,
+            help="Если не указано - показывает всю статистику",
+            key="stats_since_date"
+        )
+
+    # Вторая строка фильтров
+    filter_col4, filter_col5 = st.columns([1, 3])
+
+    with filter_col4:
+        sort_options = {'voice': '🎤 По времени в войсе', 'messages': '💬 По сообщениям'}
+        sort_by = st.selectbox(
+            "📊 Сортировка",
+            options=list(sort_options.keys()),
+            format_func=lambda x: sort_options[x],
+            help="Выберите по какому параметру сортировать список",
+            key="stats_sort_by"
+        )
+
+    st.markdown("---")
+
+    # Получаем данные
+    stats_data = get_users_stats(
+        guild_id,
+        include_roles=include_roles if include_roles else None,
+        exclude_roles=exclude_roles if exclude_roles else None,
+        since_date=since_date if since_date else None,
+        sort_by=sort_by
+    )
+
+    users = stats_data.get('users', [])
+    total_count = stats_data.get('total_count', 0)
+
+    # Метрики
+    if users:
         col1, col2, col3, col4 = st.columns(4)
-        
-        total_messages = df['period_messages'].sum()
-        total_voice_hours = df['period_voice_time'].sum() / 3600
-        active_users = len(df[df['period_messages'] > 0])
-        avg_messages = df['period_messages'].mean()
-        
-        col1.metric("💬 Всего сообщений", f"{total_messages:,}")
-        col2.metric("🎤 Всего часов в войсе", f"{total_voice_hours:.1f}")
-        col3.metric("👥 Активных пользователей", active_users)
-        col4.metric("📊 Среднее сообщений/юзер", f"{avg_messages:.0f}")
-        
-        st.markdown("---")
-        
-        # Топ по активности
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("🏆 Топ-10 по сообщениям")
-            top_messages = df.nlargest(10, 'period_messages').copy()
-            top_messages['Пользователь'] = top_messages['user_id'].apply(
-                lambda x: make_discord_link(x, members_cache)
-            )
-            top_messages['Сообщений'] = top_messages['period_messages']
-            
-            st.markdown(
-                top_messages[['Пользователь', 'Сообщений']].to_html(escape=False, index=False),
-                unsafe_allow_html=True
-            )
-        
-        with col2:
-            st.subheader("🎤 Топ-10 по времени в войсе")
-            top_voice = df.nlargest(10, 'period_voice_time').copy()
-            top_voice['Пользователь'] = top_voice['user_id'].apply(
-                lambda x: make_discord_link(x, members_cache)
-            )
-            top_voice['Часов'] = (top_voice['period_voice_time'] / 3600).round(1)
-            
-            st.markdown(
-                top_voice[['Пользователь', 'Часов']].to_html(escape=False, index=False),
-                unsafe_allow_html=True
-            )
+        total_messages = sum(u.get('period_messages', 0) for u in users)
+        total_voice_hours = sum(u.get('period_voice_time', 0) for u in users) / 3600
+        active_msg_users = len([u for u in users if u.get('period_messages', 0) > 0])
+        active_voice_users = len([u for u in users if u.get('period_voice_time', 0) > 0])
+
+        col1.metric("👥 Всего пользователей", total_count)
+        col2.metric("💬 Всего сообщений", f"{total_messages:,}")
+        col3.metric("🎤 Часов в войсе", f"{total_voice_hours:.1f}")
+        col4.metric("✅ Активных (чат/войс)", f"{active_msg_users}/{active_voice_users}")
+
+    st.markdown(f"**Найдено пользователей:** {total_count}")
+
+    if users:
+        # Подготавливаем данные для таблицы
+        table_data = []
+        for i, user in enumerate(users, 1):
+            user_id = user.get('user_id')
+            display_name = user.get('display_name') or user.get('username', 'Unknown')
+            username = user.get('username', 'unknown')
+
+            # Ссылки на профиль: 💬 = приложение Discord, 🌐 = веб
+            discord_links = f'<a href="discord://-/users/{user_id}" title="Открыть в приложении">💬</a> <a href="https://discord.com/users/{user_id}" target="_blank" title="Открыть в браузере">🌐</a>'
+
+            table_data.append({
+                '#': i,
+                'Пользователь': f'{display_name} {discord_links}',
+                'Username': f"@{username}",
+                'Сообщений': user.get('period_messages', 0),
+                'Время в войсе': format_voice_time(user.get('period_voice_time', 0)),
+                'Всего сообщений': user.get('total_messages', 0),
+                'Всего в войсе': format_voice_time(user.get('total_voice_time', 0)),
+                'user_id': user_id,
+                'display_name_raw': display_name
+            })
+
+        df = pd.DataFrame(table_data)
+
+        # Стили для таблицы
+        st.markdown("""
+        <style>
+        .stats-table { width: 100%; border-collapse: collapse; }
+        .stats-table th { background: #262730; padding: 10px; text-align: left; border-bottom: 2px solid #4a4a5a; }
+        .stats-table td { padding: 8px 10px; border-bottom: 1px solid #3a3a4a; }
+        .stats-table tr:hover { background: #2a2a3a; }
+        .stats-table a { text-decoration: none; margin: 0 2px; }
+        </style>
+        """, unsafe_allow_html=True)
+
+        # HTML таблица с ссылками
+        html_table = '<table class="stats-table"><thead><tr>'
+        html_table += '<th>#</th><th>Пользователь</th><th>Username</th><th>Сообщений</th><th>Время в войсе</th><th>Всего сообщений</th><th>Всего в войсе</th>'
+        html_table += '</tr></thead><tbody>'
+
+        for _, row in df.iterrows():
+            html_table += f'<tr>'
+            html_table += f'<td>{row["#"]}</td>'
+            html_table += f'<td>{row["Пользователь"]}</td>'
+            html_table += f'<td>{row["Username"]}</td>'
+            html_table += f'<td>{row["Сообщений"]}</td>'
+            html_table += f'<td>{row["Время в войсе"]}</td>'
+            html_table += f'<td>{row["Всего сообщений"]}</td>'
+            html_table += f'<td>{row["Всего в войсе"]}</td>'
+            html_table += '</tr>'
+
+        html_table += '</tbody></table>'
+
+        st.markdown(html_table, unsafe_allow_html=True)
+
+        # Экспорт в CSV (без HTML)
+        csv_df = df[['#', 'display_name_raw', 'Username', 'Сообщений', 'Время в войсе', 'Всего сообщений', 'Всего в войсе', 'user_id']].copy()
+        csv_df.columns = ['#', 'Пользователь', 'Username', 'Сообщений', 'Время в войсе', 'Всего сообщений', 'Всего в войсе', 'User ID']
+        csv_data = csv_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Скачать CSV",
+            data=csv_data,
+            file_name=f"stats_{guild['name']}_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime='text/csv'
+        )
+    else:
+        st.info("Нет данных для отображения. Попробуйте изменить фильтры.")
 
 # ==================== ТАБ 2: НЕАКТИВНЫЕ ====================
 with tab2:
@@ -552,31 +680,31 @@ with tab3:
 
 # ==================== ТАБ 4: ГРАФИКИ ====================
 with tab4:
-    st.header("📊 Визуализация данных")
-    
-    graph_days = st.selectbox("📅 Период для графиков", [7, 14, 30], index=2, key="graph_days")
-    
-    stats = get_guild_stats(guild_id, graph_days)
-    
-    if stats:
-        df = pd.DataFrame(stats)
-        
+    st.header("📈 Визуализация данных")
+
+    # Получаем данные для графиков
+    graph_stats = get_users_stats(guild_id)
+    graph_users = graph_stats.get('users', [])
+
+    if graph_users:
+        df = pd.DataFrame(graph_users)
+
         col1, col2 = st.columns(2)
-        
+
         with col1:
             st.subheader("📊 Распределение сообщений")
             fig1 = px.histogram(
                 df,
-                x='period_messages',
+                x='total_messages',
                 nbins=20,
                 title='Распределение пользователей по количеству сообщений',
-                labels={'period_messages': 'Количество сообщений', 'count': 'Пользователей'}
+                labels={'total_messages': 'Количество сообщений', 'count': 'Пользователей'}
             )
             st.plotly_chart(fig1, use_container_width=True)
-        
+
         with col2:
             st.subheader("🎤 Распределение времени в войсе")
-            df['voice_hours'] = df['period_voice_time'] / 3600
+            df['voice_hours'] = df['total_voice_time'] / 3600
             fig2 = px.histogram(
                 df,
                 x='voice_hours',
@@ -585,17 +713,19 @@ with tab4:
                 labels={'voice_hours': 'Часов в войсе', 'count': 'Пользователей'}
             )
             st.plotly_chart(fig2, use_container_width=True)
-        
+
         st.subheader("📈 Корреляция: Сообщения vs Время в войсе")
         fig3 = px.scatter(
             df,
-            x='period_messages',
+            x='total_messages',
             y='voice_hours',
             title='Зависимость времени в войсе от количества сообщений',
-            labels={'period_messages': 'Сообщений', 'voice_hours': 'Часов в войсе'},
+            labels={'total_messages': 'Сообщений', 'voice_hours': 'Часов в войсе'},
             opacity=0.6
         )
         st.plotly_chart(fig3, use_container_width=True)
+    else:
+        st.info("Нет данных для визуализации")
 
 st.markdown("---")
 st.markdown(f"**{bot_name} Dashboard** • Обновляется каждую минуту")

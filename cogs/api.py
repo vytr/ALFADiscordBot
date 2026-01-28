@@ -110,17 +110,132 @@ class APIServer(commands.Cog):
             
             return jsonify(members)
         
-        @self.flask_app.route('/api/guild/<int:guild_id>/stats/<int:days>')
-        def get_guild_stats(guild_id, days):
+        @self.flask_app.route('/api/guild/<int:guild_id>/users-stats')
+        def get_guild_users_stats(guild_id):
+            """Get full user stats with filters for admin panel"""
             if not self.bot.is_ready():
                 return jsonify({'error': 'Bot not ready'}), 503
-            
-            if days not in [7, 14, 30]:
-                return jsonify({'error': 'Invalid days parameter. Use 7, 14, or 30'}), 400
-            
+
+            guild = self.bot.get_guild(guild_id)
+            if not guild:
+                return jsonify({'error': 'Guild not found'}), 404
+
             try:
-                stats = self.bot.db.get_all_users_stats(guild_id, days)
-                return jsonify(stats)
+                from datetime import datetime
+
+                # Get filter parameters
+                include_roles = request.args.getlist('include_roles', type=int)
+                exclude_roles = request.args.getlist('exclude_roles', type=int)
+                since_date = request.args.get('since_date')  # Format: YYYY-MM-DD
+                sort_by = request.args.get('sort_by', 'voice')  # 'voice' or 'messages'
+
+                # Parse since_date if provided
+                filter_date = None
+                if since_date:
+                    try:
+                        filter_date = datetime.strptime(since_date, '%Y-%m-%d').date()
+                    except ValueError:
+                        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+
+                # Get all non-bot members with their roles
+                members_data = {}
+                for member in guild.members:
+                    if member.bot:
+                        continue
+
+                    member_role_ids = [r.id for r in member.roles if r.name != "@everyone"]
+
+                    # Apply role filters
+                    if include_roles:
+                        if not any(role_id in member_role_ids for role_id in include_roles):
+                            continue
+
+                    if exclude_roles:
+                        if any(role_id in member_role_ids for role_id in exclude_roles):
+                            continue
+
+                    members_data[member.id] = {
+                        'user_id': member.id,
+                        'username': member.name,
+                        'display_name': member.display_name,
+                        'avatar': str(member.avatar.url) if member.avatar else None,
+                        'roles': member_role_ids,
+                        'total_messages': 0,
+                        'total_voice_time': 0,
+                        'period_messages': 0,
+                        'period_voice_time': 0
+                    }
+
+                # Get stats from database
+                import sqlite3
+                conn = sqlite3.connect(self.bot.db.db_path)
+                cursor = conn.cursor()
+
+                # Get total stats
+                cursor.execute('''
+                    SELECT user_id, total_messages, total_voice_time
+                    FROM user_stats_total
+                    WHERE guild_id = ?
+                ''', (guild_id,))
+
+                for row in cursor.fetchall():
+                    user_id, total_messages, total_voice_time = row
+                    if user_id in members_data:
+                        members_data[user_id]['total_messages'] = total_messages or 0
+                        members_data[user_id]['total_voice_time'] = total_voice_time or 0
+
+                # Get period stats based on filter_date
+                if filter_date:
+                    # Messages since date
+                    cursor.execute('''
+                        SELECT user_id, SUM(message_count) as period_messages
+                        FROM user_messages_daily
+                        WHERE guild_id = ? AND message_date >= ?
+                        GROUP BY user_id
+                    ''', (guild_id, filter_date.isoformat()))
+
+                    for row in cursor.fetchall():
+                        user_id, period_messages = row
+                        if user_id in members_data:
+                            members_data[user_id]['period_messages'] = period_messages or 0
+
+                    # Voice time since date
+                    cursor.execute('''
+                        SELECT user_id, SUM(voice_time) as period_voice_time
+                        FROM user_voice_daily
+                        WHERE guild_id = ? AND voice_date >= ?
+                        GROUP BY user_id
+                    ''', (guild_id, filter_date.isoformat()))
+
+                    for row in cursor.fetchall():
+                        user_id, period_voice_time = row
+                        if user_id in members_data:
+                            members_data[user_id]['period_voice_time'] = period_voice_time or 0
+                else:
+                    # No date filter - period stats = total stats
+                    for user_id in members_data:
+                        members_data[user_id]['period_messages'] = members_data[user_id]['total_messages']
+                        members_data[user_id]['period_voice_time'] = members_data[user_id]['total_voice_time']
+
+                conn.close()
+
+                # Convert to list and sort
+                result = list(members_data.values())
+                if sort_by == 'messages':
+                    result.sort(key=lambda x: (x['period_messages'], x['period_voice_time']), reverse=True)
+                else:  # default: voice
+                    result.sort(key=lambda x: (x['period_voice_time'], x['period_messages']), reverse=True)
+
+                return jsonify({
+                    'users': result,
+                    'total_count': len(result),
+                    'filters': {
+                        'include_roles': include_roles,
+                        'exclude_roles': exclude_roles,
+                        'since_date': since_date,
+                        'sort_by': sort_by
+                    }
+                })
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
         
