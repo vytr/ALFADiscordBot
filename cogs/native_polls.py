@@ -729,7 +729,132 @@ class NativePollSystem(commands.Cog):
         )
         
         embed.set_footer(text="💡 !poll_results <ID> для просмотра")
-        
+
+        await ctx.send(embed=embed)
+
+    @commands.command(name='poll_fetch')
+    @is_admin_or_whitelisted()
+    async def poll_fetch(self, ctx, message_id_or_link: str):
+        """
+        Получить результаты опроса напрямую из Discord (без БД).
+        Работает только для ЗАВЕРШЁННЫХ опросов.
+
+        Формат:
+        !poll_fetch <message_id>
+        !poll_fetch <ссылка на сообщение>
+        """
+        await ctx.message.delete()
+
+        # Парсим ID из ссылки или используем как ID
+        msg_id = None
+        channel_id = None
+
+        if 'discord.com/channels/' in message_id_or_link or 'discordapp.com/channels/' in message_id_or_link:
+            try:
+                parts = message_id_or_link.rstrip('/').split('/')
+                msg_id = int(parts[-1])
+                channel_id = int(parts[-2])
+            except (ValueError, IndexError):
+                await ctx.send("❌ Неверный формат ссылки", delete_after=10)
+                return
+        else:
+            try:
+                msg_id = int(message_id_or_link)
+            except ValueError:
+                await ctx.send("❌ Неверный формат ID или ссылки", delete_after=10)
+                return
+
+        # Получаем канал
+        if channel_id:
+            channel = self.bot.get_channel(channel_id)
+        else:
+            channel = ctx.channel
+
+        if not channel:
+            await ctx.send("❌ Канал не найден", delete_after=10)
+            return
+
+        try:
+            message = await channel.fetch_message(msg_id)
+        except discord.NotFound:
+            await ctx.send("❌ Сообщение не найдено", delete_after=10)
+            return
+        except discord.Forbidden:
+            await ctx.send("❌ Нет доступа к сообщению", delete_after=10)
+            return
+
+        poll = message.poll
+        if not poll:
+            await ctx.send("❌ Это сообщение не содержит опрос", delete_after=10)
+            return
+
+        if not poll.is_finalized():
+            await ctx.send("⚠️ Опрос ещё активен. Получить список проголосовавших можно только после завершения опроса.", delete_after=15)
+            return
+
+        # Собираем голоса напрямую из Discord API
+        status_msg = await ctx.send("⏳ Загружаю данные о голосах из Discord...")
+
+        votes_by_answer = {}  # {answer_id: [members]}
+        total_votes = 0
+
+        for answer in poll.answers:
+            try:
+                voters = []
+                async for voter in answer.voters():
+                    voters.append(voter)
+                    total_votes += 1
+                votes_by_answer[answer.id] = voters
+            except Exception as e:
+                print(f"Error fetching voters for answer {answer.id}: {e}")
+                votes_by_answer[answer.id] = []
+
+        await status_msg.delete()
+
+        if total_votes == 0:
+            await ctx.send("❌ В опросе нет голосов", delete_after=10)
+            return
+
+        # Формируем embed с результатами
+        embed = discord.Embed(
+            title=f"📊 Результаты опроса (из Discord)",
+            description=f"**{poll.question}**",
+            color=0xE74C3C,
+            timestamp=datetime.utcnow()
+        )
+
+        for i, answer in enumerate(poll.answers):
+            voters = votes_by_answer.get(answer.id, [])
+            count = len(voters)
+            percentage = (count / total_votes * 100) if total_votes > 0 else 0
+
+            bar_length = int(percentage / 5)
+            bar = "█" * bar_length + "░" * (20 - bar_length)
+
+            if voters:
+                voter_names = [m.mention for m in voters[:10]]
+                voters_text = ", ".join(voter_names)
+                if len(voters) > 10:
+                    voters_text += f" *+{len(voters) - 10}*"
+            else:
+                voters_text = "*Нет голосов*"
+
+            emoji = ["🥇", "🥈", "🥉"][i] if i < 3 and count > 0 else "📊"
+
+            embed.add_field(
+                name=f"{emoji} {answer.text}",
+                value=f"`{bar}` **{count}** ({percentage:.1f}%)\n{voters_text}",
+                inline=False
+            )
+
+        embed.add_field(name="📈 Всего", value=f"{total_votes} голосов", inline=True)
+        embed.add_field(name="⏰ Статус", value="🔒 Завершен", inline=True)
+
+        poll_link = f"https://discord.com/channels/{ctx.guild.id}/{channel.id}/{msg_id}"
+        embed.add_field(name="🔗 Ссылка", value=f"[Перейти к опросу]({poll_link})", inline=True)
+
+        embed.set_footer(text=f"ID: {msg_id} | Данные получены напрямую из Discord")
+
         await ctx.send(embed=embed)
 
 
