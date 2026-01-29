@@ -797,8 +797,10 @@ class APIServer(commands.Cog):
                 return jsonify({'error': str(e)}), 500
 
     def run_flask(self):
-        """Запуск Flask сервера"""
-        self.flask_app.run(host='0.0.0.0', port=5555, debug=False, use_reloader=False)
+        """Запуск Flask через Waitress (production-ready)"""
+        from waitress import serve
+        print("🚀 Starting Waitress API server on http://0.0.0.0:5555")
+        serve(self.flask_app, host='0.0.0.0', port=5555, threads=4)
 
 
 async def setup(bot):
