@@ -43,3 +43,4 @@ google_credentials.json
 cloudflared-linux-amd64.deb
 dashboard/.streamlit/
 uploads/
+restart_services.sh
