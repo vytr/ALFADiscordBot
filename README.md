@@ -1,295 +1,324 @@
-# GuildBrew Discord Bot
+# GuildBrew - Discord Bot
 
-Многофункциональный Discord бот на Python с системой статистики, опросов, выговоров и модерации.
+Professional Discord bot for server statistics, moderation, and management.
 
-## 🎯 Основные возможности
+[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Discord.py](https://img.shields.io/badge/discord.py-2.4.0+-blue.svg)](https://github.com/Rapptz/discord.py)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-### 📊 Автоматическое отслеживание опросов
-- Отслеживание **ЛЮБЫХ** опросов на сервере (не только созданных ботом)
-- Автоматическая регистрация при первом голосе
-- Сохранение всех голосов в базу данных
-- Работает даже с опросами, созданными до запуска бота
+## 🌟 Features
 
-### 📈 Статистика активности
-- Отслеживание сообщений пользователей
-- Подсчет времени в голосовых каналах
-- Топ активных пользователей
-- Поиск неактивных участников
-- Экспорт в CSV/XLSX
+### 📊 Activity Tracking
+- **Message Statistics**: Track user messages with daily/weekly/monthly breakdowns
+- **Voice Tracking**: Monitor time spent in voice channels
+- **Leaderboards**: View top active members by messages or voice time
+- **Inactive Users**: Identify members with no activity over specified periods
+- **Export**: Download statistics as CSV/XLSX files
 
-### ⚠️ Система выговоров
-- Выдача выговоров с автоматическим истечением (7 дней)
-- Максимум 3 активных выговора на пользователя
-- Уведомления в DM
-- История выговоров
-- Статистика нарушений
+### 🎮 Mini-Games
+- **Drink Game**: Fun drinking game with statistics tracking
+- **Duels**: Challenge other members to random duels
+- **Leaderboards**: Track top players and their stats
 
-### 🎮 Мини-игры
-- **Drink Game** - шуточная игра с напитками
-- Статистика "выпитого"
-- Топ любителей выпить
+### 🎛️ Interactive Panel
+- **Slash Commands**: Modern Discord interactions with `/panel`
+- **Button Navigation**: Easy-to-use interface with buttons and menus
+- **Whitelist Management**: Control access to bot commands
+- **Role Management**: Create and assign roles with custom permissions
 
-### 🎛️ Панель управления
-- Интерактивная панель с кнопками
-- Управление whitelist
-- Просмотр статистики
-- Управление опросами
+## 📦 Installation
 
-## 📦 Установка
+### Prerequisites
+- Python 3.8 or higher
+- pip (Python package manager)
+- Discord Bot Token ([Get one here](https://discord.com/developers/applications))
 
-### 1. Требования
-- Python 3.8+
-- pip
-
-### 2. Клонирование репозитория
+### 1. Clone Repository
 ```bash
-git clone <repository_url>
-cd discord-bot
+git clone https://github.com/vytr/guildbrew.app.git
+cd guildbrew.app
 ```
 
-### 3. Установка зависимостей
+### 2. Create Virtual Environment
+```bash
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+### 3. Install Dependencies
 ```bash
 pip install -r requirements.txt
-
-# Или с флагом для системных пакетов:
-pip install -r requirements.txt --break-system-packages
 ```
 
-### 4. Настройка
-1. Скопируйте `.env.example` в `.env`:
-   ```bash
-   cp .env.example .env
-   ```
+### 4. Configure Environment
+```bash
+cp .env.example .env
+nano .env  # Edit with your favorite editor
+```
 
-2. Откройте `.env` и заполните:
-   ```env
-   DISCORD_TOKEN=ваш_токен_бота
-   DISCORD_PREFIX=!
-   ```
+**Required configuration in `.env`:**
+```env
+DISCORD_TOKEN=your_bot_token_here
+DISCORD_PREFIX=!
+```
 
-3. Получите токен бота:
-   - Зайдите на https://discord.com/developers/applications
-   - Создайте приложение → Bot → Token → Copy
+### 5. Enable Discord Intents
 
-### 5. Настройка Discord Developer Portal
-
-**КРИТИЧНО для работы опросов:**
-
-1. Зайдите в [Discord Developer Portal](https://discord.com/developers/applications)
-2. Выберите ваше приложение → Bot
-3. **Privileged Gateway Intents** → включите:
+1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
+2. Select your bot application
+3. Navigate to **Bot** section
+4. Enable **Privileged Gateway Intents**:
    - ✅ **MESSAGE CONTENT INTENT**
    - ✅ **SERVER MEMBERS INTENT**
-4. Save Changes
+   - ✅ **PRESENCE INTENT** (optional)
+5. Save changes
 
-### 6. Приглашение бота
+### 6. Invite Bot to Server
 
-Создайте ссылку приглашения:
-1. OAuth2 → URL Generator
-2. Scopes: `bot` + `applications.commands`
-3. Permissions: выберите нужные права (рекомендуется Administrator для полного функционала)
-4. Скопируйте ссылку и откройте в браузере
+Generate invite URL with required permissions:
 
-**Важно:** Если бот уже на сервере, но intents включены недавно - **выгоните и пригласите бота заново!**
+```
+https://discord.com/api/oauth2/authorize?client_id=YOUR_BOT_CLIENT_ID&permissions=8&scope=bot%20applications.commands
+```
 
-### 7. Запуск
+Replace `YOUR_BOT_CLIENT_ID` with your bot's Client ID from Developer Portal.
+
+### 7. Run Bot
+
 ```bash
+# Make sure virtual environment is activated
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Start the bot
 python bot.py
 ```
 
-При успешном запуске увидите:
-```
-🤖 Бот запущен: YourBotName
-📌 ID: 123456789
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔍 Проверка intents:
-   guilds: True
-   guild_messages: True
-   message_content: True
-   members: True
-   polls: True ← КРИТИЧНО ДЛЯ ОПРОСОВ!
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ Бот готов к работе!
 ```
 
-## 📚 Команды
+## 🎯 Usage
 
-### Опросы
-- `!poll_results <ID или ссылка>` - Результаты опроса
-- `!poll_export <ID или ссылка>` - Экспорт в XLSX
-- `!poll_export_detail <ID или ссылка> [7/14/30]` - Экспорт с статистикой активности
-- `!poll_list` - Список всех опросов
+### Basic Commands
 
-**Как получить ID или ссылку:**
-- ПКМ на опросе → "Копировать ссылку на сообщение"
-- ПКМ на опросе → "Копировать ID сообщения" (требует Developer Mode)
-
-### Статистика
-- `!gb_stats [@user] [7/14/30]` - Статистика пользователя
-- `!gb_leaderboard [7/14/30]` - Топ активных
-- `!gb_inactive [7/14/30] [@роль]` - Неактивные участники
-- `!gb_summary [7/14/30] [@роль]` - Сводка активности
-- `!gb_export [7/14/30] [@роль]` - Экспорт в CSV
-
-### Выговоры
-- `!warn @user причина` - Выдать выговор
-- `!unwarn <ID> [причина]` - Снять выговор
-- `!warnings [@user]` - Проверить выговоры
-- `!warnings_list` - Список всех с выговорами
-- `!warnings_active` - Статистика активных выговоров
-
-### Whitelist (только для админов)
-- `!gb_whitelist_add @user` - Добавить в whitelist
-- `!gb_whitelist_remove @user` - Удалить из whitelist
-- `!gb_whitelist_list` - Список whitelist
-
-### Игры
-- `!drink` - Выпить (раз в час)
-- `!drink_stats [@user]` - Статистика напитков
-- `!drink_top [количество]` - Топ любителей выпить
-
-### Slash команды
-- `/panel` - Панель управления (интерактивная)
-- `/polls_menu` - Меню управления опросами
-
-## 🗄️ Структура базы данных
-
-Бот использует **две SQLite базы данных:**
-
-### `bot_database.db` - Основная БД
-- `whitelist` - Пользователи с правами
-- `user_stats_total` - Общая статистика
-- `user_messages_daily` - Сообщения по дням
-- `user_voice_sessions` - Сессии в голосовых
-- `user_voice_daily` - Время в войсе по дням
-- `drink_stats` - Статистика игры с напитками
-- `warnings` - Система выговоров
-
-### `polls_database.db` - База опросов
-- `polls` - Отслеженные опросы
-- `poll_options` - Варианты ответов
-- `poll_votes` - Голоса пользователей
-
-## 🔧 Структура проекта
-
-```
-.
-├── bot.py                      # Главный файл бота
-├── config.py                   # Конфигурация
-├── database.py                 # Работа с БД
-├── utils.py                    # Вспомогательные функции
-├── requirements.txt            # Зависимости
-├── .env.example               # Пример конфигурации
-├── cogs/                      # Модули команд
-│   ├── basic.py              # Базовые команды
-│   ├── drink_game.py         # Игра с напитками
-│   ├── help.py               # Система помощи
-│   ├── native_polls.py       # Отслеживание опросов
-│   ├── panel.py              # Панель управления
-│   ├── polls_extension.py    # Расширение опросов (legacy)
-│   ├── stats.py              # Статистика
-│   ├── warnings.py           # Выговоры
-│   └── whitelist.py          # Whitelist
-└── views/                     # UI компоненты
-    └── whitelist_view.py     # View для whitelist
+#### Statistics
+```bash
+!gb_stats [@user] [7/14/30]              # View user statistics
+!gb_leaderboard [7/14/30]                # Server leaderboard
+!gb_inactive [7/14/30] [@role]           # Find inactive members
+!gb_summary [7/14/30] [@role]            # Activity summary
+!gb_export [7/14/30] [@role]             # Export to CSV
 ```
 
-## ⚙️ Конфигурация intents
+#### Polls
+```bash
+!gb_poll_export_detailed <message_id> [7/14/30]  # Export poll with stats
+```
 
-В `bot.py` критично настроены следующие intents:
+**How to get poll message ID:**
+- Right-click on poll → "Copy Message Link"
+- Or enable Developer Mode → Right-click → "Copy ID"
 
+#### Warnings(TEST FEATURE)
+```bash
+!warn @user <reason>                     # Issue warning
+!unwarn <warning_id> [reason]            # Remove warning
+!warnings [@user]                        # Check warnings
+!warnings_list                           # List all users with warnings
+!warnings_active                         # Active warnings statistics
+```
+
+#### Whitelist (Admin Only)
+```bash
+!gb_whitelist_add @user                  # Add to whitelist
+!gb_whitelist_remove @user               # Remove from whitelist
+!gb_whitelist_list                       # Show whitelist
+```
+
+#### Games
+```bash
+!drink                                   # Drink game (1 hour cooldown)
+!drink_stats [@user]                     # Drink statistics
+!drink_top [limit]                       # Top drinkers
+!gb_duel @user                           # Challenge to duel
+```
+
+### Slash Commands
+
+```bash
+/panel                                   # Open interactive control panel
+```
+
+## 🔧 Configuration
+
+### Database
+
+Bot uses SQLite database:
+- `bot_database.db` - Main database (stats, whitelist, warnings)
+
+**Automatic cleanup:** Data older than 30 days is automatically removed. Can be turned off for each server
+
+### Customization
+
+Edit `config.py` for bot settings:
 ```python
-intents = discord.Intents.default()
-intents.message_content = True   # Чтение содержимого сообщений
-intents.members = True           # Информация о пользователях
-intents.guilds = True            # События сервера
-intents.guild_messages = True    # События сообщений
-intents.polls = True             # КРИТИЧНО ДЛЯ ОПРОСОВ!
+DISCORD_PREFIX = '!'  # Command prefix
 ```
 
-## 🐛 Устранение проблем
+### Voice Session Tracking
 
-### Опросы не отслеживаются
+**IMPORTANT:** The bot automatically:
+- Starts voice sessions when users join voice channels
+- Ends sessions when users leave
+- Recovers active sessions on bot restart
+- Closes hanging sessions (>24h) automatically
 
-1. **Проверьте версию discord.py:**
-   ```python
-   import discord
-   print(discord.__version__)  # Должно быть >= 2.4.0
-   ```
+## 🐛 Troubleshooting
 
-2. **Проверьте intents в Developer Portal:**
-   - MESSAGE CONTENT INTENT включен?
-   - Бот приглашен ПОСЛЕ включения intents?
+### Commands Not Working
 
-3. **Проверьте intents в коде:**
-   ```bash
-   python test_poll_events.py
-   ```
-   Должно показать: `polls: True`
+**Symptom:** Bot doesn't respond to commands
 
-4. **Если ничего не помогло:**
-   - Выгоните бота с сервера
-   - Убедитесь что intents включены
-   - Пригласите бота заново по новой ссылке
+**Solution:**
+1. Check prefix in `.env` matches your commands
+2. Verify bot has "Send Messages" permission
+3. Check you're in whitelist or have Administrator role
+4. View console for error messages
 
-### Команды не работают
+### Voice Time Not Recording
 
-- Проверьте префикс в `.env` (по умолчанию `!`)
-- Убедитесь что у бота есть права на чтение/отправку сообщений
-- Проверьте whitelist или права администратора
+**Symptom:** Voice statistics show 0 hours
 
-### Ошибка 404 при poll_results
+**Solution:**
+1. Check "Server Members Intent" is enabled
+2. Verify bot can see voice channels
+3. Check database for hanging sessions: `!gb_voice_debug` (admin only)
+4. Restart bot to close hanging sessions
 
-- Опрос был удален или канал недоступен
-- Бот покажет результаты из базы данных (если есть варианты ответов)
+### High Memory Usage
 
-## 📊 Экспорт данных
+**Symptom:** Bot uses excessive RAM
 
-Бот поддерживает экспорт в два формата:
+**Solution:**
+```bash
+# Run database cleanup
+# (automatic every 24h, but can trigger manually by restarting)
+python bot.py
+```
 
-### XLSX (рекомендуется)
-- Цветное форматирование
-- Ссылки на профили Discord
-- Границы и выравнивание
-- Требует: `openpyxl`
+## 📊 Architecture
 
-### CSV (fallback)
-- Простой текстовый формат
-- Если openpyxl не установлен
+```
+guildbrew/
+├── bot.py                 # Main bot entry point
+├── config.py              # Configuration
+├── database.py            # Database operations
+├── utils.py               # Helper functions
+├── requirements.txt       # Python dependencies
+├── .env.example          # Environment template
+├── cogs/                 # Bot modules (cogs)
+│   ├── api.py           # REST API (Flask)
+│   ├── basic.py         # Basic commands
+│   ├── drink_game.py    # Drink game
+│   ├── help.py          # Help system
+│   ├── native_polls.py  # Poll tracking
+│   ├── panel.py         # Interactive panel
+│   ├── role_manager.py  # Role management
+│   ├── stats.py         # Statistics tracking
+│   ├── user_panel.py    # User panel
+│   ├── warnings.py      # Warning system
+│   └── whitelist.py     # Whitelist management
+└── views/               # UI components
+    └── whitelist_view.py
+```
 
-## 🔐 Безопасность
+## 🔐 Security
 
-- ✅ Токен бота хранится в `.env` (не коммитится в git)
-- ✅ Система whitelist для ограничения доступа
-- ✅ Проверка прав администратора
-- ✅ База данных локальная (SQLite)
+- ✅ Bot token stored in `.env` (not committed to git)
+- ✅ Whitelist system restricts command access
+- ✅ Administrator-only commands for sensitive operations
+- ✅ Rate limiting on API endpoints (Gunicorn workers)
+- ✅ Input validation on all commands
 
-## 🤝 Вклад в проект
+**Never share your `.env` file or bot token!**
 
-1. Fork репозитория
-2. Создайте ветку: `git checkout -b feature/название`
-3. Commit изменений: `git commit -m 'Добавлена функция'`
-4. Push в ветку: `git push origin feature/название`
-5. Создайте Pull Request
+## 🚀 Production Deployment
 
-## 📝 Лицензия
+### Using systemd (Linux)
 
-MIT
+Create service file:
+```bash
+sudo nano /etc/systemd/system/guildbrew.service
+```
 
-## 🔄 Обновления
+```ini
+[Unit]
+Description=GuildBrew Discord Bot
+After=network.target
 
-### v2.0.0 - Автоматическое отслеживание опросов
-- ✅ Отслеживание ЛЮБЫХ опросов (не только созданных ботом)
-- ✅ RAW события для надежности
-- ✅ Экспорт в XLSX с форматированием
-- ✅ Ссылки на профили Discord
-- ✅ Поддержка удаленных/закрытых опросов
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/path/to/guildbrew
+Environment="PATH=/path/to/guildbrew/venv/bin"
+ExecStart=/path/to/guildbrew/venv/bin/python bot.py
+Restart=on-failure
+RestartSec=10
 
-### v1.0.0 - Первый релиз
-- Базовая функциональность
-- Статистика, выговоры, игры
-- Панель управления
+[Install]
+WantedBy=multi-user.target
+```
 
-## 📞 Контакты
+Enable and start:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable guildbrew
+sudo systemctl start guildbrew
+sudo systemctl status guildbrew
+```
 
-Для вопросов и предложений создавайте Issue в репозитории.
+### Automatic Restart Script
+
+If you have multiple services:
+```bash
+#!/bin/bash
+# restart_services.sh
+
+SERVICES=("guildbrew.service")
+INTERVAL=5
+
+for service in "${SERVICES[@]}"; do
+    echo "⏳ Restarting: $service"
+    sudo systemctl restart "$service"
+    sleep $INTERVAL
+done
+
+echo "✅ All services restarted"
+```
+
+## 📝 Contributing
+
+1. Fork the repository
+2. Create feature branch: `git checkout -b feature/amazing-feature`
+3. Commit changes: `git commit -m 'Add amazing feature'`
+4. Push to branch: `git push origin feature/amazing-feature`
+5. Open Pull Request
+
+## 📜 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Support
+
+- **Documentation:** [GitHub Wiki](https://github.com/vytr/guildbrew/wiki)
+- **Issues:** [GitHub Issues](https://github.com/vytr/guildbrew/issues)
+- **Donate:** [Buy Me a Coffee](https://buymeacoffee.com/vytr94a)
+
+## 🏆 Credits
+
+- Built with [discord.py](https://github.com/Rapptz/discord.py)
+- Database: SQLite3
+- API Server: Flask
+- UI: Discord Interactions
+
+---
+
+**Made with ❤️ by the GuildBrew team**
