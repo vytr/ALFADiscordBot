@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from datetime import datetime
-from utils import is_admin_or_whitelisted
+from utils import is_admin_or_whitelisted, t
 
 class CustomHelpCommand(commands.HelpCommand):
     """Кастомная команда помощи с красивым embed"""
@@ -10,6 +10,7 @@ class CustomHelpCommand(commands.HelpCommand):
         """Отправляет общую справку по всем командам"""
         # Проверяем права пользователя
         ctx = self.context
+        guild_id = ctx.guild.id
 
         # Проверка на администратора
         if not ctx.author.guild_permissions.administrator:
@@ -23,8 +24,8 @@ class CustomHelpCommand(commands.HelpCommand):
         await ctx.message.delete()
 
         embed = discord.Embed(
-            title="📖 Справка по командам бота",
-            description="Список всех доступных команд",
+            title=t('help_title', guild_id=guild_id),
+            description=t('help_description', guild_id=guild_id),
             color=discord.Color.blue(),
             timestamp=datetime.utcnow()
         )
@@ -34,12 +35,12 @@ class CustomHelpCommand(commands.HelpCommand):
             # Фильтруем команды, которые может видеть пользователь
             filtered = await self.filter_commands(cmds, sort=True)
             if filtered:
-                cog_name = getattr(cog, "qualified_name", "Другие команды")
+                cog_name = getattr(cog, "qualified_name", t('help_other_commands', guild_id=guild_id))
 
                 # Формируем список команд
                 command_list = []
                 for cmd in filtered:
-                    command_list.append(f"`{self.context.prefix}{cmd.name}` - {cmd.short_doc or 'Нет описания'}")
+                    command_list.append(f"`{self.context.prefix}{cmd.name}` - {cmd.short_doc or t('help_no_description', guild_id=guild_id)}")
 
                 if command_list:
                     embed.add_field(
@@ -48,7 +49,7 @@ class CustomHelpCommand(commands.HelpCommand):
                         inline=False
                     )
 
-        embed.set_footer(text=f"Используйте {self.context.prefix}help <команда> для подробной информации")
+        embed.set_footer(text=t('help_footer', guild_id=guild_id, prefix=self.context.prefix))
 
         channel = self.get_destination()
         await channel.send(embed=embed)
@@ -57,6 +58,7 @@ class CustomHelpCommand(commands.HelpCommand):
         """Отправляет справку по конкретной команде"""
         # Проверяем права пользователя
         ctx = self.context
+        guild_id = ctx.guild.id
 
         # Проверка на администратора
         if not ctx.author.guild_permissions.administrator:
@@ -70,14 +72,14 @@ class CustomHelpCommand(commands.HelpCommand):
         await ctx.message.delete()
 
         embed = discord.Embed(
-            title=f"Команда: {self.context.prefix}{command.name}",
-            description=command.help or "Нет описания",
+            title=t('help_command_title', guild_id=guild_id, prefix=self.context.prefix, command=command.name),
+            description=command.help or t('help_no_description', guild_id=guild_id),
             color=discord.Color.blue()
         )
 
         if command.aliases:
             embed.add_field(
-                name="Альтернативные названия",
+                name=t('help_aliases', guild_id=guild_id),
                 value=", ".join(f"`{alias}`" for alias in command.aliases),
                 inline=False
             )
@@ -88,7 +90,7 @@ class CustomHelpCommand(commands.HelpCommand):
             usage += f" {command.signature}"
 
         embed.add_field(
-            name="Использование",
+            name=t('help_usage', guild_id=guild_id),
             value=f"`{usage}`",
             inline=False
         )
@@ -98,8 +100,9 @@ class CustomHelpCommand(commands.HelpCommand):
 
     async def send_error_message(self, error):
         """Отправляет сообщение об ошибке"""
+        # Note: We can't easily get guild_id here since error might not have context
         embed = discord.Embed(
-            title="❌ Ошибка",
+            title=t('help_error_title'),
             description=error,
             color=discord.Color.red()
         )

@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 from datetime import datetime
+from utils import t
 
 class Whitelist(commands.Cog):
     """Команды для управления whitelist"""
@@ -14,44 +15,47 @@ class Whitelist(commands.Cog):
     async def whitelist_add(self, ctx, member: discord.Member):
         """Добавить пользователя в whitelist (только для администраторов)"""
         await ctx.message.delete()
-        if self.db.add_to_whitelist(ctx.guild.id, member.id, ctx.author.id):
+        guild_id = ctx.guild.id
+        if self.db.add_to_whitelist(guild_id, member.id, ctx.author.id):
             embed = discord.Embed(
                 title="✅ Whitelist",
-                description=f"{member.mention} добавлен в whitelist",
+                description=t('whitelist_added', guild_id=guild_id, user=member.mention),
                 color=discord.Color.green()
             )
             await ctx.send(embed=embed)
         else:
-            await ctx.send("❌ Ошибка при добавлении в whitelist")
+            await ctx.send(t('whitelist_add_error', guild_id=guild_id))
 
     @commands.command(name='gb_whitelist_remove')
     @commands.has_permissions(administrator=True)
     async def whitelist_remove(self, ctx, member: discord.Member):
         """Удалить пользователя из whitelist (только для администраторов)"""
         await ctx.message.delete()
-        if self.db.remove_from_whitelist(ctx.guild.id, member.id):
+        guild_id = ctx.guild.id
+        if self.db.remove_from_whitelist(guild_id, member.id):
             embed = discord.Embed(
                 title="✅ Whitelist",
-                description=f"{member.mention} удален из whitelist",
+                description=t('whitelist_removed', guild_id=guild_id, user=member.mention),
                 color=discord.Color.orange()
             )
             await ctx.send(embed=embed)
         else:
-            await ctx.send("❌ Ошибка при удалении из whitelist")
+            await ctx.send(t('whitelist_remove_error', guild_id=guild_id))
 
     @commands.command(name='gb_whitelist_list')
     @commands.has_permissions(administrator=True)
     async def whitelist_list(self, ctx):
         """Показать список пользователей в whitelist (только для администраторов)"""
         await ctx.message.delete()
-        whitelist = self.db.get_whitelist(ctx.guild.id)
+        guild_id = ctx.guild.id
+        whitelist = self.db.get_whitelist(guild_id)
 
         if not whitelist:
-            await ctx.send("📋 Whitelist пуст")
+            await ctx.send(t('whitelist_empty', guild_id=guild_id))
             return
 
         embed = discord.Embed(
-            title="📋 Whitelist",
+            title=t('whitelist_title', guild_id=guild_id),
             color=discord.Color.blue(),
             timestamp=datetime.utcnow()
         )
@@ -61,7 +65,7 @@ class Whitelist(commands.Cog):
             if member:
                 embed.add_field(
                     name=f"{member.name}",
-                    value=f"ID: {user_id}\nДобавлен: {added_at}",
+                    value=f"ID: {user_id}\n{t('whitelist_added_at', guild_id=guild_id, date=added_at)}",
                     inline=False
                 )
 
@@ -73,7 +77,7 @@ class Whitelist(commands.Cog):
     async def whitelist_error(self, ctx, error):
         """Обработка ошибок команд whitelist"""
         if isinstance(error, commands.MissingPermissions):
-            await ctx.send("❌ У вас нет прав администратора для использования этой команды!")
+            await ctx.send(t('whitelist_no_permission', guild_id=ctx.guild.id))
 
 async def setup(bot):
     db = bot.db  # Получаем объект базы данных из бота

@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from datetime import datetime
 import io
-from utils import is_admin_or_whitelisted
+from utils import is_admin_or_whitelisted, t
 
 
 class NativePollSystem(commands.Cog):
@@ -24,9 +24,10 @@ class NativePollSystem(commands.Cog):
         !gb_poll_export_detailed <ссылка на сообщение> [7/14/30]
         """
         await ctx.message.delete()
+        guild_id = ctx.guild.id
 
         if days not in [7, 14, 30]:
-            await ctx.send("❌ Период: 7, 14 или 30 дней", delete_after=10)
+            await ctx.send(t('poll_invalid_period', guild_id=guild_id), delete_after=10)
             return
 
         # Парсим ID из ссылки
@@ -39,13 +40,13 @@ class NativePollSystem(commands.Cog):
                 msg_id = int(parts[-1])
                 channel_id = int(parts[-2])
             except (ValueError, IndexError):
-                await ctx.send("❌ Неверный формат ссылки", delete_after=10)
+                await ctx.send(t('poll_invalid_link', guild_id=guild_id), delete_after=10)
                 return
         else:
             try:
                 msg_id = int(message_id_or_link)
             except ValueError:
-                await ctx.send("❌ Неверный формат ID или ссылки", delete_after=10)
+                await ctx.send(t('poll_invalid_id', guild_id=guild_id), delete_after=10)
                 return
 
         # Получаем канал
@@ -55,29 +56,29 @@ class NativePollSystem(commands.Cog):
             channel = ctx.channel
 
         if not channel:
-            await ctx.send("❌ Канал не найден", delete_after=10)
+            await ctx.send(t('poll_channel_not_found', guild_id=guild_id), delete_after=10)
             return
 
         try:
             message = await channel.fetch_message(msg_id)
         except discord.NotFound:
-            await ctx.send("❌ Сообщение не найдено", delete_after=10)
+            await ctx.send(t('poll_message_not_found', guild_id=guild_id), delete_after=10)
             return
         except discord.Forbidden:
-            await ctx.send("❌ Нет доступа к сообщению", delete_after=10)
+            await ctx.send(t('poll_no_access', guild_id=guild_id), delete_after=10)
             return
 
         poll = message.poll
         if not poll:
-            await ctx.send("❌ Это сообщение не содержит опрос", delete_after=10)
+            await ctx.send(t('poll_not_a_poll', guild_id=guild_id), delete_after=10)
             return
 
         if not poll.is_finalized():
-            await ctx.send("⚠️ Опрос ещё активен. Экспорт возможен только после завершения опроса.", delete_after=15)
+            await ctx.send(t('poll_not_finalized', guild_id=guild_id), delete_after=15)
             return
 
         # Собираем голоса напрямую из Discord API
-        status_msg = await ctx.send("⏳ Загружаю данные о голосах из Discord...")
+        status_msg = await ctx.send(t('poll_loading_votes', guild_id=guild_id))
 
         votes_by_answer = {}  # {answer_id: [members]}
         all_voters = set()
@@ -97,11 +98,11 @@ class NativePollSystem(commands.Cog):
 
         if total_votes == 0:
             await status_msg.delete()
-            await ctx.send("❌ В опросе нет голосов", delete_after=10)
+            await ctx.send(t('poll_no_votes', guild_id=guild_id), delete_after=10)
             return
 
         # Получаем статистику активности для всех проголосовавших
-        await status_msg.edit(content="⏳ Загружаю статистику активности...")
+        await status_msg.edit(content=t('poll_loading_stats', guild_id=guild_id))
 
         user_stats = {}
         for user_id in all_voters:
@@ -124,7 +125,7 @@ class NativePollSystem(commands.Cog):
             )
             sorted_votes_by_answer[answer_id] = sorted_voters
 
-        await status_msg.edit(content="⏳ Создаю Excel файл...")
+        await status_msg.edit(content=t('poll_creating_file', guild_id=guild_id))
 
         try:
             from openpyxl import Workbook
@@ -235,14 +236,14 @@ class NativePollSystem(commands.Cog):
             )
 
             await status_msg.delete()
-            await ctx.send(f"📊 Экспорт из Discord ({days}д, {total_votes} голосов)", file=file)
+            await ctx.send(t('poll_export_success', guild_id=guild_id, days=days, votes=total_votes), file=file)
 
         except ImportError:
             await status_msg.delete()
-            await ctx.send("❌ Требуется установить openpyxl: `pip install openpyxl`", delete_after=10)
+            await ctx.send(t('poll_openpyxl_required', guild_id=guild_id), delete_after=10)
         except Exception as e:
             await status_msg.delete()
-            await ctx.send(f"❌ Ошибка: {e}", delete_after=10)
+            await ctx.send(t('poll_error', guild_id=guild_id, error=str(e)), delete_after=10)
             import traceback
             traceback.print_exc()
 
